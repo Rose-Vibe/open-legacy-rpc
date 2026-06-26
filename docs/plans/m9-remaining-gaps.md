@@ -19,7 +19,7 @@ edge-case types and quality-of-life fixes.
 
 ---
 
-## Milestone 9a: NetworkViewID 16-bit Encoding
+## Milestone 9a: NetworkViewID 16-bit Encoding — COMPLETE
 
 ### Background
 
@@ -50,7 +50,7 @@ param encoding is not.
 
 ---
 
-## Milestone 9b: NetworkPlayer RPC Param
+## Milestone 9b: NetworkPlayer RPC Param — COMPLETE
 
 ### Background
 
@@ -77,7 +77,7 @@ before the connection was established. The encoding is likely int32 BE
 
 ---
 
-## Milestone 9c: Instantiate Prefab Identifier
+## Milestone 9c: Instantiate Prefab Identifier — COMPLETE
 
 ### Background
 
@@ -106,7 +106,7 @@ a hash, a serialized asset GUID, or an index.
 
 ---
 
-## Milestone 9d: Code Cleanup (from M3/M7)
+## Milestone 9d: Code Cleanup (from M3/M7) — COMPLETE
 
 ### Background
 

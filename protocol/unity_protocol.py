@@ -209,6 +209,29 @@ def decode_view_id_bits(bs):
     return bs.read_bits(48)
 
 
+def encode_view_id_16(scope, id_value):
+    """Encode a NetworkViewID as 16-bit packed value for RPC params.
+
+    scope: 'scene' for scene-baked views, 'allocated' for runtime-allocated
+    id_value: the view's numeric ID
+    """
+    if scope == 'scene':
+        return id_value << 2
+    else:
+        return 0x4000 | (id_value << 6)
+
+
+def decode_view_id_16(val16):
+    """Decode a 16-bit packed NetworkViewID from RPC params.
+
+    Returns (scope, id_value) where scope is 'scene' or 'allocated'.
+    """
+    if val16 & 0x4000:
+        return ('allocated', (val16 & 0x3FFF) >> 6)
+    else:
+        return ('scene', val16 >> 2)
+
+
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
                           mode=RPCMode.Server):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
@@ -430,6 +453,86 @@ def _decode_string_param(bs):
     tree = get_tree()
     decoded = decode_string(huffman_bits, tree)
     return decoded.decode('ascii', errors='replace')
+
+
+# ── Network.Instantiate ──
+
+
+def encode_instantiate_group_flags(group, level_prefix=0):
+    """Encode the 16-bit group/flags field for Network.Instantiate params.
+
+    bits 15-6: reserved (0), bits 5-3: group, bit 2: flag (1), bits 1-0: level_prefix
+    """
+    return (group << 3) | 0x04 | (level_prefix & 0x03)
+
+
+def decode_instantiate_group_flags(val16):
+    """Decode the 16-bit group/flags field. Returns (group, level_prefix)."""
+    group = (val16 >> 3) & 0x07
+    level_prefix = val16 & 0x03
+    return group, level_prefix
+
+
+def decode_instantiate_params(bs, remaining_bits):
+    """Decode __RPCNetworkInstantiate param payload from a BitStream.
+
+    Returns dict with: group, level_prefix, prefab_id (bytes),
+    position (x,y,z), rotation (x,y,z,w), unknown_int32, view_id (scope, id).
+    """
+    result = {}
+    group_flags = bs.read_bits(16)
+    result['group'], result['level_prefix'] = decode_instantiate_group_flags(group_flags)
+
+    prefab_bits = bs.read_bits_as_str(133)
+    result['prefab_id_bits'] = prefab_bits
+
+    x = bs.read_float_be()
+    y = bs.read_float_be()
+    z = bs.read_float_be()
+    result['position'] = (x, y, z)
+
+    qx = bs.read_float_be()
+    qy = bs.read_float_be()
+    qz = bs.read_float_be()
+    qw = bs.read_float_be()
+    result['rotation'] = (qx, qy, qz, qw)
+
+    result['unknown_int32'] = bs.read_i32_be()
+    view_id_16 = bs.read_bits(16)
+    result['view_id'] = decode_view_id_16(view_id_16)
+
+    return result
+
+
+def encode_instantiate_params(group, prefab_id_bits, position, rotation,
+                               view_id_scope, view_id_value,
+                               unknown_int32=1, level_prefix=0):
+    """Encode __RPCNetworkInstantiate params into a BitStream.
+
+    prefab_id_bits: 133-character string of '0'/'1' (opaque prefab identifier)
+    position: (x, y, z) tuple
+    rotation: (x, y, z, w) quaternion tuple
+    Returns BitStream with the encoded params.
+    """
+    bs = BitStream()
+    bs.write_bits(encode_instantiate_group_flags(group, level_prefix), 16)
+
+    for bit_char in prefab_id_bits:
+        bs.write_bit(1 if bit_char == '1' else 0)
+
+    bs.write_float_be(position[0])
+    bs.write_float_be(position[1])
+    bs.write_float_be(position[2])
+
+    bs.write_float_be(rotation[0])
+    bs.write_float_be(rotation[1])
+    bs.write_float_be(rotation[2])
+    bs.write_float_be(rotation[3])
+
+    bs.write_i32_be(unknown_int32)
+    bs.write_bits(encode_view_id_16(view_id_scope, view_id_value), 16)
+
+    return bs
 
 
 # ── State Sync ──

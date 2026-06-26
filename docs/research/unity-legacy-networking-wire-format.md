@@ -358,6 +358,8 @@ padding between them.
 | Quaternion | 4× float32 BE (x, y, z, w) | 128 |
 | string | WriteCompressed\<uint32\>(bitLength) + Huffman data | variable |
 | byte[] | uint32 BE (byte count) + raw bytes | 32 + N×8 |
+| NetworkPlayer | int32 BE (player index) | 32 |
+| NetworkViewID | 16-bit packed (see §14) | 16 |
 
 ### 3.6 WriteCompressed\<uint32\>
 
@@ -757,27 +759,41 @@ constant=`0x0000` (internal RPC). The method hash identifies
 Position and rotation are verified: Vector3(1,2,3) and Quaternion.identity
 match exactly at the documented bit offsets.
 
-### 13.3 Pre-Transform Data (149 bits, partially decoded)
+### 13.3 Pre-Transform Data (149 bits)
 
-| Bit Offset | Width | Field | Observed |
-|------------|-------|-------|----------|
-| 0–15 | 16 | Unknown (possibly ViewID) | `0x0004` |
-| 16–148 | 133 | Prefab identifier + metadata | Not plaintext or Huffman |
+| Bit Offset | Width | Field | Description |
+|------------|-------|-------|-------------|
+| 0–15 | 16 | Group/flags | See below |
+| 16–148 | 133 | Prefab identifier | Opaque encoding, unique per prefab |
 
-The prefab identifier encoding is not yet determined. It is NOT
-Huffman-encoded text (the Huffman encoding of "NetworkPrefab" does not
-appear in the data). It may be a hash, a serialized asset path, or an
-internal index.
+**Group/flags field (16 bits):**
 
-### 13.4 Post-Transform Data (48 bits, partially decoded)
+| Bits | Width | Field | Observed |
+|------|-------|-------|----------|
+| 15–6 | 10 | Reserved | Always 0 |
+| 5–3 | 3 | Network group | 0 or 5 |
+| 2 | 1 | Flag | Always 1 |
+| 1–0 | 2 | Level prefix | Always 0 |
 
-| Bit Offset | Width | Field | Observed |
-|------------|-------|-------|----------|
-| 0–31 | 32 | int32 BE | 1 |
-| 32–47 | 16 | Unknown | `0x4040` |
+Examples: group=0 → `0x0004` (= 0|0<<3|1<<2|0), group=5 → `0x002C` (= 0|5<<3|1<<2|0).
 
-The int32=1 may represent the network group (but the experiment used
-group=0) or an owner/player identifier.
+**Prefab identifier (133 bits):**
+Confirmed by differential analysis — two instantiations of the same prefab
+("NetworkPrefab") produce identical 133-bit regions, while a different
+prefab ("NetworkPrefab2") produces a completely different bit pattern.
+The encoding is NOT Huffman-encoded text or ASCII. It may be a hash of
+the prefab's asset path or an internal Unity serialization format.
+
+### 13.4 Post-Transform Data (48 bits)
+
+| Bit Offset | Width | Field | Description |
+|------------|-------|-------|-------------|
+| 0–31 | 32 | Unknown (int32 BE) | Always 1 (may be view count or scope) |
+| 32–47 | 16 | Instantiated ViewID | 16-bit NetworkViewID encoding (§14) |
+
+The last 16 bits are the NetworkViewID of the newly instantiated object,
+using the standard 16-bit packed encoding. Observed: AllocatedID:1
+(`0x4040`), AllocatedID:2 (`0x4080`), AllocatedID:3 (`0x40c0`).
 
 ### 13.5 ViewID Allocation Handshake
 
@@ -796,22 +812,59 @@ The instantiated object receives a ViewID from the server's pool.
 When `NetworkViewID` is used as an RPC parameter type, it is encoded as
 **16 bits** (not the 48-bit encoding used in message headers).
 
-### 14.1 Observed Encodings
+### 14.1 Encoding
 
-| NetworkViewID | 16-bit Wire Value |
-|---------------|-------------------|
-| SceneID: 1 | `0x0004` |
-| AllocatedID: 50 | `0x4C80` |
+Bit 14 distinguishes scene-baked from runtime-allocated ViewIDs:
 
-The encoding is opaque — the values do not correspond to simple integer
-representations of the ViewID. The 16-bit format may be a compressed
-encoding or bitfield.
+| Type | Formula | Bit 14 |
+|------|---------|--------|
+| SceneID:N | `N << 2` | 0 |
+| AllocatedID:N | `0x4000 \| (N << 6)` | 1 |
 
-### 14.2 RPC Method
+The low bits (2 for SceneID, 6 for AllocatedID) are zero in all
+observations. They may encode the level prefix, but this is unverified
+since SetLevelPrefix has no wire effect.
+
+**Decoding:**
+```
+if val & 0x4000:
+    type = 'allocated'
+    id = (val & 0x3FFF) >> 6
+else:
+    type = 'scene'
+    id = val >> 2
+```
+
+### 14.2 Verified Encodings
+
+| NetworkViewID | 16-bit Wire Value | Formula |
+|---------------|-------------------|---------|
+| SceneID:1 | `0x0004` | 1 << 2 = 4 |
+| AllocatedID:1 | `0x4040` | 0x4000 + 1×64 |
+| AllocatedID:2 | `0x4080` | 0x4000 + 2×64 |
+| AllocatedID:3 | `0x40C0` | 0x4000 + 3×64 |
+| AllocatedID:50 | `0x4C80` | 0x4000 + 50×64 |
+
+### 14.3 RPC Method
 
 The `RPC_NetworkViewID` method has:
 - Hash: `310ba632fd579053a8ce`
 - Method index: `0x74` = (37 - 1 - 7) × 4
+
+---
+
+## 15. NetworkPlayer as RPC Parameter
+
+`NetworkPlayer` is encoded as **int32 BE** — the player's index value.
+
+| Player | Wire Value |
+|--------|------------|
+| Server (index 0) | `0x00000000` |
+| Client 1 (index 1) | `0x00000001` |
+
+The `RPC_NetworkPlayer` method has:
+- Hash: `310ba632fe7649ab19`
+- Method index: `0xE0` = (36 - 1 - 7) × 4
 
 ---
 

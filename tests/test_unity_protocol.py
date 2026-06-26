@@ -8,6 +8,9 @@ from protocol.unity_protocol import (
     compute_method_index, METHOD_INDEX_MAP,
     INTERNAL_RPCS, INTERNAL_RPC_CONSTANT, USER_RPC_CONSTANT,
     lookup_method_by_hash,
+    encode_view_id_16, decode_view_id_16,
+    encode_instantiate_group_flags, decode_instantiate_group_flags,
+    encode_instantiate_params, decode_instantiate_params,
 )
 from protocol.bitstream import BitStream
 
@@ -387,6 +390,53 @@ def test_rpc_network_player_roundtrip():
     assert result['params'] == [1]
 
 
+def test_view_id_16_encode_scene():
+    """SceneID encoding: N << 2."""
+    assert encode_view_id_16('scene', 1) == 0x0004
+    assert encode_view_id_16('scene', 0) == 0x0000
+    assert encode_view_id_16('scene', 2) == 0x0008
+
+
+def test_view_id_16_encode_allocated():
+    """AllocatedID encoding: 0x4000 | (N << 6)."""
+    assert encode_view_id_16('allocated', 1) == 0x4040
+    assert encode_view_id_16('allocated', 2) == 0x4080
+    assert encode_view_id_16('allocated', 3) == 0x40c0
+    assert encode_view_id_16('allocated', 50) == 0x4c80
+
+
+def test_view_id_16_decode_all_captures():
+    """Decode all 5 captured NetworkViewID values."""
+    assert decode_view_id_16(0x0004) == ('scene', 1)
+    assert decode_view_id_16(0x4040) == ('allocated', 1)
+    assert decode_view_id_16(0x4080) == ('allocated', 2)
+    assert decode_view_id_16(0x40c0) == ('allocated', 3)
+    assert decode_view_id_16(0x4c80) == ('allocated', 50)
+
+
+def test_view_id_16_roundtrip():
+    """Encode then decode recovers the original values."""
+    for scope, id_val in [('scene', 0), ('scene', 1), ('scene', 100),
+                           ('allocated', 1), ('allocated', 50), ('allocated', 255)]:
+        encoded = encode_view_id_16(scope, id_val)
+        decoded = decode_view_id_16(encoded)
+        assert decoded == (scope, id_val), f"Failed for ({scope}, {id_val})"
+
+
+def test_network_player_hash():
+    """RPC_NetworkPlayer produces the observed hash."""
+    _, hash_val = compute_method_id('RPC_NetworkPlayer')
+    assert hash_val.hex() == '310ba632fe7649ab19'
+
+
+def test_network_player_is_int32():
+    """NetworkPlayer wire values match int32 BE for player indices 0 and 1."""
+    for player_idx in [0, 1]:
+        payload, bits = encode_rpc_subsequent('RPC_NetworkPlayer', [player_idx])
+        result = decode_rpc(payload, bits)
+        assert result['params'] == [player_idx]
+
+
 def test_internal_rpc_lookup():
     """Internal RPC method names are registered and can be looked up."""
     _, hash_val = compute_method_id('__RPCNetworkInstantiate')
@@ -404,6 +454,53 @@ def test_password_in_connection_request():
     # Verify the password is at bytes 25+
     assert msg[25:] == password
     assert msg[25:].decode('ascii') == 'secret123'
+
+
+def test_instantiate_group_flags_encode():
+    """Group/flags field encodes group in bits 5-3 with bit 2 set."""
+    assert encode_instantiate_group_flags(0) == 0x0004
+    assert encode_instantiate_group_flags(5) == 0x002c
+    assert encode_instantiate_group_flags(7) == 0x003c
+
+
+def test_instantiate_group_flags_decode():
+    """Decode group/flags from observed wire values."""
+    assert decode_instantiate_group_flags(0x0004) == (0, 0)
+    assert decode_instantiate_group_flags(0x002c) == (5, 0)
+
+
+def test_instantiate_params_roundtrip():
+    """Encode then decode instantiate params preserves all fields."""
+    prefab_bits = '1' * 65 + '0' * 68  # 133 bits
+    pos = (1.0, 2.0, 3.0)
+    rot = (0.0, 0.0, 0.0, 1.0)
+
+    param_bs = encode_instantiate_params(
+        group=5, prefab_id_bits=prefab_bits,
+        position=pos, rotation=rot,
+        view_id_scope='allocated', view_id_value=3,
+    )
+
+    param_bs.pos = 0
+    result = decode_instantiate_params(param_bs, param_bs.bit_length)
+
+    assert result['group'] == 5
+    assert result['level_prefix'] == 0
+    assert result['prefab_id_bits'] == prefab_bits
+    assert abs(result['position'][0] - 1.0) < 1e-5
+    assert abs(result['position'][1] - 2.0) < 1e-5
+    assert abs(result['position'][2] - 3.0) < 1e-5
+    assert abs(result['rotation'][3] - 1.0) < 1e-5
+    assert result['unknown_int32'] == 1
+    assert result['view_id'] == ('allocated', 3)
+
+
+def test_instantiate_group_flags_matches_capture():
+    """Wire values from capture match our encoding."""
+    assert encode_instantiate_group_flags(0) == 0x0004
+    assert encode_instantiate_group_flags(5) == 0x002c
+    # 0x002c - 0x0004 = 0x0028 = 40 = 5 * 8
+    assert 0x002c - 0x0004 == 5 * 8
 
 
 if __name__ == '__main__':
