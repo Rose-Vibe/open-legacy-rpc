@@ -28,8 +28,8 @@ Last updated: 2026-06-26
 | 2.3 Unity Layer (0x83/0x81) | Mostly complete | 0x81 has 4 unknown fields (5-8, 9-12, 17-20, 21-28) |
 | 2.4 Keepalive (0x00/0x03) | Complete | Ping/pong timestamps |
 
-**Known unknowns:**
-- 0x81 player assignment: fields 2-3 and 5-7 have unknown purpose (observed as 0, 1, 2, 1, 2). Only field 1 (player_index) and field 4 (viewid_base) are confirmed.
+All 0x81 fields decoded (M10a): constant_1=1, constant_0=0, player_index,
+viewid_stride=50, constant_2=2, block_start=player*2-1, block_end=player*2.
 
 ### §3 RPC Wire Format — COMPLETE (one cosmetic unknown)
 
@@ -114,6 +114,11 @@ Constant 0x0000 vs 0x0002 distinction. `__RPCNetworkInstantiate` hash known.
 
 int32 BE of player index. Verified for indices 0 and 1.
 
+### §16 Disconnect Cleanup — COMPLETE
+
+RemoveRPCs and DestroyPlayerObjects produce no wire messages. Purely
+server-side operations. Verified by pcap analysis (M10f).
+
 ---
 
 ## Known Unknowns
@@ -122,7 +127,7 @@ Fields that are decoded positionally but whose semantics or derivation are not f
 
 | Location | Field | Width | Observed Values | Impact |
 |----------|-------|-------|-----------------|--------|
-| §2.3 (0x81) | fields 2,3,5,6,7 | 5×32 bits | 0, 1, 2, 1, 2 | Unknown — may matter for multi-client |
+| §2.3 (0x81) | ~~fields 2,3,5,6,7~~ | ~~5×32 bits~~ | ~~0, 1, 2, 1, 2~~ | **RESOLVED** — all fields decoded (M10a) |
 | §3.3.1 | method_tag | 4 bits | 0, 4, 8, C | Cosmetic — Unity accepts 0 |
 | §4.1 | state sync constant | 16 bits | 0x0004 | Unknown purpose, always same |
 | §13.3 | prefab identifier | 133 bits | Opaque per-prefab | Cannot encode from name |
@@ -148,30 +153,26 @@ depends on the scene setup. Rebuilding the Unity project (e.g., adding
 prefabs) can change the numbering. **Workaround:** use wildcard view_id
 handlers or discover the view_id dynamically from incoming messages.
 
-### 3. Split packet reassembly untested at scale
+### 3. ~~Split packet reassembly untested at scale~~ — RESOLVED (M10c)
 
-The reassembly code handles the protocol correctly but has never been
-tested with payloads large enough to actually split (>~1200 bytes).
-Large byte[] RPC params or many-field state sync could trigger this.
+Tested with payloads up to 10KB. Split packet reassembly works correctly.
 
-### 4. Multi-client interop untested
+### 4. ~~Multi-client interop untested~~ — RESOLVED (M10a)
 
-Only single-client connections have been verified. The 0x81 player
-assignment message fields (2,3,5,6,7) may differ for multi-client
-scenarios. ViewID range management and concurrent dispatch are untested.
+Tested with 3+ simultaneous clients. All 0x81 fields decoded. ViewID
+ranges confirmed non-overlapping. Tested up to 512 concurrent clients.
 
-### 5. Network.RemoveRPCs / DestroyPlayerObjects not implemented
+### 5. ~~Network.RemoveRPCs / DestroyPlayerObjects not implemented~~ — RESOLVED (M10f)
 
-Distance-server calls both on player disconnect. Our server implementation
-cleans up allocated ViewIDs but doesn't send any wire messages for these
-operations. The wire protocol for these (if any) is uninvestigated.
+These are purely server-side operations with NO wire messages. The server
+cleans up ViewIDs and per-client state on disconnect. Verified by pcap
+analysis: no packets after disconnect ACK.
 
 ### 6. RPCMode.Player target bit semantics
 
 The 1-bit target field after the RPCMode nibble (when mode=Player) is
-always 0 in observations. It may encode the target player index or be
-a flag. Sending RPC to a specific player works via transport-level
-addressing, but the bit's purpose is unconfirmed.
+always 0 in observations. Targeting works via transport-level addressing
+(send_to specific peer). The bit's purpose is unconfirmed but non-blocking.
 
 ---
 
@@ -185,14 +186,14 @@ Features the distance-server project requires, mapped against our implementation
 | RPC with `int` params | Yes (time sync: 2× int) | Implemented, tested | No |
 | RPC with no params | Yes (time sync request) | Implemented, tested | No |
 | RPCMode.Others | Yes (broadcast) | Implemented, tested | No |
-| RPCMode.Player | Yes (targeted send) | Implemented, **untested in interop** | **Yes** |
+| RPCMode.Player | Yes (targeted send) | Implemented, tested (M10b) | No |
 | ReliableDeltaCompressed sync | Yes (1 view/car) | Implemented, tested | No |
 | Unreliable state sync | Yes (2 views/car) | Implemented, tested | No |
-| Multiple NetworkViews | Yes (3 per car) | Implemented, **untested** | **Yes** |
-| Multi-client (12-24 players) | Yes | Implemented, **untested** | **Yes** |
-| Password auth | Yes (server-side) | Implemented, **untested in interop** | **Yes** |
-| Network.RemoveRPCs | Yes (on disconnect) | **Not implemented** | **Yes** |
-| Network.DestroyPlayerObjects | Yes (on disconnect) | **Not implemented** | **Yes** |
+| Multiple NetworkViews | Yes (3 per car) | Implemented, tested (M10d) | No |
+| Multi-client (12-24 players) | Yes | Implemented, tested (M10a, up to 512) | No |
+| Password auth | Yes (server-side) | Implemented, tested (M10e) | No |
+| Network.RemoveRPCs | Yes (on disconnect) | Server-side only, implemented (M10f) | No |
+| Network.DestroyPlayerObjects | Yes (on disconnect) | Server-side only, implemented (M10f) | No |
 | Network groups | Not in reimplemented bridge | Implemented (server-side) | No |
 | Network.SetLevelPrefix | No | Documented (no wire format) | No |
 | Network.Instantiate | No | Decode-only | No |
@@ -201,11 +202,14 @@ Features the distance-server project requires, mapped against our implementation
 | NetworkViewID as param | Yes (3 IDs per car) | Implemented, tested | No |
 | NetworkPlayer as param | Yes (as RPC target) | Implemented, tested | No |
 
-### Critical gaps for Distance:
+### Critical gaps for Distance: **ALL RESOLVED (M10)**
 
-1. **RPCMode.Player interop** — Distance uses targeted RPCs heavily. Untested with real Unity.
-2. **Multi-client** — Distance supports 12-24 players. Our server has never handled >1.
-3. **Multiple NetworkViews per object** — Distance uses 3 views per car (different sync modes). Untested.
-4. **Network.RemoveRPCs / DestroyPlayerObjects** — Called on every disconnect. Wire protocol unknown.
-5. **Password auth interop** — Distance sets `incomingPassword`. Untested with Unity client.
-6. **Large byte[] payloads** — Distance's primary data channel. Split packet path untested.
+All six gaps identified pre-M10 have been closed:
+1. RPCMode.Player interop — tested (M10b)
+2. Multi-client — tested up to 512 simultaneous clients (M10a)
+3. Multiple NetworkViews — tested with 3 views, mixed sync modes (M10d)
+4. RemoveRPCs / DestroyPlayerObjects — server-side only, no wire protocol (M10f)
+5. Password auth interop — bidirectional Python↔Unity tested (M10e)
+6. Large byte[] payloads — tested up to 10KB with split packets (M10c)
+
+**Remaining gap:** Master Server registration (out of scope — separate protocol).
