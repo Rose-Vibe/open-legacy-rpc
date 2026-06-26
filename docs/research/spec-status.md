@@ -123,16 +123,25 @@ server-side operations. Verified by pcap analysis (M10f).
 
 ## Known Unknowns
 
-Fields that are decoded positionally but whose semantics or derivation are not fully understood.
+Fields that are decoded positionally but whose semantics or derivation
+are not fully understood. None of these block Distance integration.
 
 | Location | Field | Width | Observed Values | Impact |
 |----------|-------|-------|-----------------|--------|
-| §2.3 (0x81) | ~~fields 2,3,5,6,7~~ | ~~5×32 bits~~ | ~~0, 1, 2, 1, 2~~ | **RESOLVED** — all fields decoded (M10a) |
 | §3.3.1 | method_tag | 4 bits | 0, 4, 8, C | Cosmetic — Unity accepts 0 |
 | §4.1 | state sync constant | 16 bits | 0x0004 | Unknown purpose, always same |
 | §13.3 | prefab identifier | 133 bits | Opaque per-prefab | Cannot encode from name |
 | §13.4 | post-transform int32 | 32 bits | Always 1 | May be view count |
 | §14.1 | ViewID low bits | 2-6 bits | Always 0 | May encode level prefix |
+| §3.4 | RPCMode.Player target bit | 1 bit | Always 0 | Transport addressing works without it |
+
+### Previously unknown, now resolved
+
+| Location | Field | Resolution |
+|----------|-------|------------|
+| §2.3 (0x81) | fields 2–7 | All decoded (M10a): constants 1,0 + player_index + stride + constants 2 + block_start/end |
+| §1.4 | split packet reassembly | Tested up to 10KB payloads (M10c) |
+| §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
 
 ---
 
@@ -153,26 +162,12 @@ depends on the scene setup. Rebuilding the Unity project (e.g., adding
 prefabs) can change the numbering. **Workaround:** use wildcard view_id
 handlers or discover the view_id dynamically from incoming messages.
 
-### 3. ~~Split packet reassembly untested at scale~~ — RESOLVED (M10c)
+### 3. Instantiate prefab identifier is opaque
 
-Tested with payloads up to 10KB. Split packet reassembly works correctly.
-
-### 4. ~~Multi-client interop untested~~ — RESOLVED (M10a)
-
-Tested with 3+ simultaneous clients. All 0x81 fields decoded. ViewID
-ranges confirmed non-overlapping. Tested up to 512 concurrent clients.
-
-### 5. ~~Network.RemoveRPCs / DestroyPlayerObjects not implemented~~ — RESOLVED (M10f)
-
-These are purely server-side operations with NO wire messages. The server
-cleans up ViewIDs and per-client state on disconnect. Verified by pcap
-analysis: no packets after disconnect ACK.
-
-### 6. RPCMode.Player target bit semantics
-
-The 1-bit target field after the RPCMode nibble (when mode=Player) is
-always 0 in observations. Targeting works via transport-level addressing
-(send_to specific peer). The bit's purpose is unconfirmed but non-blocking.
+The 133-bit prefab identifier in `Network.Instantiate` cannot be derived
+from the prefab name — it must be captured from a live Unity instance.
+**Workaround:** Distance doesn't use `Network.Instantiate`, so this is
+non-blocking. For other games, pass-through from captures.
 
 ---
 
