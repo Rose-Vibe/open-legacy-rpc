@@ -137,8 +137,8 @@ def test_state_sync_server_to_client():
     server_thread = threading.Thread(target=server.run, args=(3.0,), daemon=True)
     server_thread.start()
 
-    def handle_sync(data_stream):
-        val = data_stream.read_i32_be()
+    def handle_sync(result):
+        val = result['data_stream'].read_i32_be()
         received_values.append(val)
 
     client = UnityClient()
@@ -197,6 +197,126 @@ def test_multi_param_rpc():
     finally:
         server.stop()
         server_thread.join(timeout=2.0)
+
+
+def test_disconnect_cleanup():
+    """Server cleans up per-client state on disconnect, no resource leaks."""
+    server = UnityServer(port=17779)
+    server.start()
+
+    connected = []
+    disconnected = []
+    server.on_connect(lambda addr, idx: connected.append((addr, idx)))
+    server.on_disconnect(lambda addr, idx: disconnected.append((addr, idx)))
+
+    server_thread = threading.Thread(target=server.run, args=(5.0,), daemon=True)
+    server_thread.start()
+    time.sleep(0.1)
+
+    try:
+        # Connect first client, allocate views, disconnect
+        c1 = UnityClient()
+        c1.connect('127.0.0.1', 17779, timeout=2.0)
+        assert c1.connected
+        addr1 = connected[0][0]
+        v1 = server.allocate_view_id(addr1)
+        v2 = server.allocate_view_id(addr1)
+        assert len(server.get_allocated_views(addr1)) == 2
+        c1.disconnect()
+        time.sleep(0.3)
+
+        assert len(disconnected) == 1
+        assert server.get_allocated_views(addr1) == []
+        assert addr1 not in server._rpc_sent_methods
+        assert addr1 not in server._rpc_counters
+
+        # Connect second client — should get fresh state
+        c2 = UnityClient()
+        c2.connect('127.0.0.1', 17779, timeout=2.0)
+        assert c2.connected
+        addr2 = connected[1][0]
+        v3 = server.allocate_view_id(addr2)
+        assert v3 == server.get_viewid_base(addr2)
+        c2.disconnect()
+        time.sleep(0.3)
+
+        assert len(disconnected) == 2
+        assert len(server._delta_state) == 0
+    finally:
+        server.stop()
+        server_thread.join(timeout=2.0)
+
+
+def test_password_correct():
+    """Client with correct password connects successfully."""
+    server = UnityServer(port=17776, password='secret123')
+    server.start()
+
+    connected = []
+    server.on_connect(lambda addr, idx: connected.append(idx))
+    server.on_disconnect(lambda addr, idx: None)
+
+    server_thread = threading.Thread(target=server.run, args=(3.0,), daemon=True)
+    server_thread.start()
+    time.sleep(0.1)
+
+    client = UnityClient()
+    try:
+        client.connect('127.0.0.1', 17776, timeout=3.0, password='secret123')
+        assert client.connected
+        assert len(connected) == 1
+        client.disconnect()
+    finally:
+        server.stop()
+        server_thread.join(timeout=2.0)
+
+
+def test_password_wrong():
+    """Client with wrong password is rejected."""
+    server = UnityServer(port=17777, password='secret123')
+    server.start()
+
+    connected = []
+    server.on_connect(lambda addr, idx: connected.append(idx))
+    server.on_disconnect(lambda addr, idx: None)
+
+    server_thread = threading.Thread(target=server.run, args=(3.0,), daemon=True)
+    server_thread.start()
+    time.sleep(0.1)
+
+    client = UnityClient()
+    try:
+        client.connect('127.0.0.1', 17777, timeout=2.0, password='wrongpass')
+        assert False, "Should have timed out"
+    except TimeoutError:
+        pass
+    assert len(connected) == 0
+    server.stop()
+    server_thread.join(timeout=2.0)
+
+
+def test_password_missing():
+    """Client without password is rejected when server requires one."""
+    server = UnityServer(port=17778, password='secret123')
+    server.start()
+
+    connected = []
+    server.on_connect(lambda addr, idx: connected.append(idx))
+    server.on_disconnect(lambda addr, idx: None)
+
+    server_thread = threading.Thread(target=server.run, args=(3.0,), daemon=True)
+    server_thread.start()
+    time.sleep(0.1)
+
+    client = UnityClient()
+    try:
+        client.connect('127.0.0.1', 17778, timeout=2.0, password='')
+        assert False, "Should have timed out"
+    except TimeoutError:
+        pass
+    assert len(connected) == 0
+    server.stop()
+    server_thread.join(timeout=2.0)
 
 
 if __name__ == '__main__':

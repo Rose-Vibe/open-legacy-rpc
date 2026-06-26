@@ -23,8 +23,9 @@ from .bitstream import BitStream
 class UnityServer:
     """Server that speaks Unity's legacy networking protocol."""
 
-    def __init__(self, port=7777, tick_rate=15, viewid_stride=50):
-        self._raknet = RakNetServer(port=port, viewid_stride=viewid_stride)
+    def __init__(self, port=7777, tick_rate=15, viewid_stride=50, password=''):
+        self._raknet = RakNetServer(port=port, viewid_stride=viewid_stride,
+                                    password=password)
         self._tick_rate = tick_rate
         self._viewid_stride = viewid_stride
         self._rpc_handlers = {}
@@ -39,6 +40,7 @@ class UnityServer:
         self._allocated_views = {}  # addr -> list of allocated view_ids
         self._view_counters = {}  # addr -> next allocation offset
         self._delta_state = {}  # (addr, view_id) -> list of prev field values
+        self._view_id_scopes = {}  # view_id -> 'scene' or 'allocated'
 
     def start(self):
         self._raknet.start()
@@ -84,21 +86,22 @@ class UnityServer:
         self._rpc_handlers[method_name] = handler
 
     def get_viewid_base(self, addr):
-        """Get the ViewID allocation base for a client."""
+        """Get the ViewID allocation start for a client."""
         player_idx = self._raknet.player_indices.get(addr, 0)
-        return player_idx * self._viewid_stride
+        block_start = player_idx * 2 - 1
+        return block_start * self._viewid_stride
 
     def allocate_view_id(self, addr, group=0):
         """Allocate a ViewID for a client. Returns the allocated view_id."""
         player_idx = self._raknet.player_indices.get(addr)
         if player_idx is None:
             raise ValueError(f"Unknown client: {addr}")
-        base = player_idx * self._viewid_stride
+        base = self.get_viewid_base(addr)
         offset = self._view_counters.get(addr, 0)
-        if offset >= self._viewid_stride:
-            raise ValueError(f"ViewID range exhausted for {addr}")
         view_id = base + offset
         self._view_counters[addr] = offset + 1
+        if addr not in self._allocated_views:
+            self._allocated_views[addr] = []
         self._allocated_views[addr].append(view_id)
         self._view_groups[view_id] = group
         return view_id
@@ -154,11 +157,13 @@ class UnityServer:
                 if self._is_send_enabled(addr, view_id):
                     self._send_rpc_to(addr, method_name, params, view_id, mode)
 
-    def send_state_sync(self, view_id, data_bs, target=None, is_first=False):
+    def send_state_sync(self, view_id, data_bs, target=None, is_first=False,
+                        view_id_scope='scene'):
         """Send a state sync message to one or all clients. Respects group filtering."""
         self._sync_timestamp = (self._sync_timestamp + 83) & 0xFFFF
         payload, bits = encode_state_sync(
-            view_id, self._sync_timestamp, data_bs, is_first)
+            view_id, self._sync_timestamp, data_bs, is_first,
+            view_id_scope=view_id_scope)
 
         if target:
             if self._is_send_enabled(target, view_id):
@@ -171,7 +176,7 @@ class UnityServer:
                                          Reliability.UNRELIABLE_SEQUENCED)
 
     def send_delta_state_sync(self, view_id, field_values, field_widths,
-                              target=None):
+                              target=None, view_id_scope='scene'):
         """Send a ReliableDeltaCompressed state sync message.
 
         field_values: list of current field values
@@ -179,6 +184,7 @@ class UnityServer:
         Tracks previous state per-client for dirty flag computation.
         """
         self._sync_timestamp = (self._sync_timestamp + 83) & 0xFFFF
+        self._view_id_scopes[view_id] = view_id_scope
 
         if target:
             if self._is_send_enabled(target, view_id):
@@ -195,9 +201,10 @@ class UnityServer:
         if is_first:
             prev = [0] * len(field_values)
 
+        scope = self._view_id_scopes.get(view_id, 'scene')
         payload, bits = encode_delta_state_sync(
             view_id, self._sync_timestamp, field_values, prev,
-            field_widths, is_first)
+            field_widths, is_first, view_id_scope=scope)
 
         self._delta_state[key] = list(field_values)
         self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED)

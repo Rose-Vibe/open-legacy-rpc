@@ -104,11 +104,21 @@ def test_roundtrip_sequence():
 
 
 def test_view_id_preserved():
-    """ViewID survives encode/decode."""
+    """ViewID survives encode/decode for scene views."""
     payload, bits = encode_delta_state_sync(
-        12345, 0, [1], [0], [32])
+        5, 0, [1], [0], [32], view_id_scope='scene')
     result = decode_delta_state_sync(payload, bits, 1, [32], [0])
-    assert result['view_id'] == 12345
+    assert result['view_id'] == 5
+    assert result['view_id_scope'] == 'scene'
+
+
+def test_allocated_view_id_preserved():
+    """ViewID survives encode/decode for allocated views."""
+    payload, bits = encode_delta_state_sync(
+        3, 0, [1], [0], [32], view_id_scope='allocated')
+    result = decode_delta_state_sync(payload, bits, 1, [32], [0])
+    assert result['view_id'] == 3
+    assert result['view_id_scope'] == 'allocated'
 
 
 def test_timestamp_preserved():

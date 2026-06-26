@@ -108,8 +108,8 @@ def test_state_sync_filtered_by_group():
     server, client, addr, _ = _make_server_client(17785)
     try:
         sync_values = []
-        def on_sync(data_stream):
-            sync_values.append(data_stream.read_i32_be())
+        def on_sync(result):
+            sync_values.append(result['data_stream'].read_i32_be())
 
         client.on_state_sync(0, on_sync)
         client.on_state_sync(1, on_sync)

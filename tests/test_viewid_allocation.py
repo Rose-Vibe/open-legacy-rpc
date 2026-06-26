@@ -125,9 +125,9 @@ def test_allocate_unknown_client():
         pass
 
 
-def test_range_exhaustion():
-    """allocate_view_id raises when the range is exhausted."""
-    server = UnityServer(port=17798, viewid_stride=3)
+def test_viewid_block_allocation():
+    """allocate_view_id uses block-based ranges matching Unity's scheme."""
+    server = UnityServer(port=17798, viewid_stride=50)
     server.start()
 
     connected = []
@@ -144,14 +144,13 @@ def test_range_exhaustion():
         time.sleep(0.3)
 
         addr = connected[0][0]
-        server.allocate_view_id(addr)
-        server.allocate_view_id(addr)
-        server.allocate_view_id(addr)
-        try:
-            server.allocate_view_id(addr)
-            assert False, "Should have raised ValueError"
-        except ValueError:
-            pass
+        # Player 1's block_start = 1*3-2 = 1, so allocation starts at 1*50 = 50
+        v1 = server.allocate_view_id(addr)
+        v2 = server.allocate_view_id(addr)
+        v3 = server.allocate_view_id(addr)
+        assert v1 == 50
+        assert v2 == 51
+        assert v3 == 52
     finally:
         client.disconnect()
         server.stop()

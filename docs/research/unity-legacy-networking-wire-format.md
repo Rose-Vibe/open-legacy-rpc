@@ -547,36 +547,63 @@ a ViewID range via the player assignment message (0x81).
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 1 | msg_id | `0x81` |
-| 1–4 | 4 | player_index | uint32 BE, 1-based |
-| 5–8 | 4 | field_1 | uint32 BE, observed as 0 |
-| 9–12 | 4 | field_2 | uint32 BE, observed as 1 |
-| 13–16 | 4 | viewid_base | uint32 BE, first allocatable ViewID |
-| 17–20 | 4 | field_4 | uint32 BE, observed as 2 |
-| 21–24 | 4 | field_5 | uint32 BE, observed as 1 |
-| 25–28 | 4 | field_6 | uint32 BE, observed as 2 |
+| 1–4 | 4 | constant_1 | uint32 BE, always 1 (scene/level marker) |
+| 5–8 | 4 | constant_0 | uint32 BE, always 0 |
+| 9–12 | 4 | player_index | uint32 BE, 1-based, increments per client |
+| 13–16 | 4 | viewid_stride | uint32 BE, ViewIDs per block (default 50) |
+| 17–20 | 4 | constant_2 | uint32 BE, always 2 |
+| 21–24 | 4 | block_start | uint32 BE, first ViewID block for this player |
+| 25–28 | 4 | block_end | uint32 BE, last ViewID block for this player |
+
+Multi-client observations (max_connections=4, 4 clients connected):
+
+| Player | player_index | viewid_stride | block_start | block_end |
+|--------|-------------|---------------|-------------|-----------|
+| 1 | 1 | 50 | 1 | 2 |
+| 2 | 2 | 50 | 3 | 4 |
+| 3 | 3 | 50 | 5 | 6 |
+| 4 | 4 | 50 | 7 | 8 |
+
+Block assignment formula: `block_start = player_index * 2 - 1`,
+`block_end = player_index * 2`.
 
 ### 7.2 Allocation Scheme
 
-Unity uses a stride of 50 ViewIDs per player:
+The client computes its ViewID allocation start as
+`block_start * viewid_stride`. Each block contains `viewid_stride`
+allocatable ViewIDs.
 
-| Player Index | ViewID Range |
-|-------------|-------------|
-| 0 (server) | 0–49 |
-| 1 | 50–99 |
-| 2 | 100–149 |
-| N | N×50 – (N+1)×50−1 |
+| Player | block_start | Allocation Start | Observed IDs |
+|--------|------------|-----------------|-------------|
+| 1 | 1 | 1×50 = 50 | 50, 51, 52 |
+| 2 | 3 | 3×50 = 150 | 150, 151, ... |
+| 3 | 5 | 5×50 = 250 | 250, 251, ... |
+| 4 | 7 | 7×50 = 350 | 350, 351, ... |
 
 The client calls `Network.AllocateViewID()` which returns the next
-sequential ID from its range. No per-allocation wire traffic — the
-allocation is entirely local after receiving the base in the 0x81 message.
+sequential ID from its allocated block. No per-allocation wire traffic —
+the allocation is entirely local after receiving the block in the 0x81
+message.
+
+Each player gets `(block_end - block_start + 1) * viewid_stride`
+allocatable ViewIDs (default: 2 × 50 = 100). When the range is
+exhausted, `AllocateViewID()` returns `AllocatedID 0` (unassigned) and
+Unity logs a warning — no exception, no crash.
 
 `Network.AllocateViewID()` called before connection returns
 `NetworkViewID.unassigned` (AllocatedID 0).
 
-### 7.3 Server Implementation
+### 7.3 Scaling Behavior
+
+The viewid_stride remains 50 regardless of max_connections. Unity never
+adjusts stride, caps, or refuses higher max_connections (tested up to
+2048 with 512 simultaneous clients). The block formula `player * 2 - 1`
+is constant — player 512 gets alloc_start=51150 with no issues.
+
+### 7.4 Server Implementation
 
 The server:
-1. Assigns `viewid_base = player_index * stride` in the 0x81 message.
+1. Sends the 0x81 message with the player's block range.
 2. Tracks which ViewIDs each player has allocated.
 3. Frees all allocated ViewIDs on player disconnect (equivalent to
    `Network.RemoveRPCs()` / `DestroyPlayerObjects()`).
@@ -806,7 +833,7 @@ Before `Network.Instantiate` can be used, a ViewID allocation handshake
 occurs during connection:
 
 1. **C→S:** `0x83` — client requests ViewID allocation
-2. **S→C:** `0x81` — server assigns ViewID range (base=50 for player 1)
+2. **S→C:** `0x81` — server assigns ViewID block (stride=50, block_start=1 for player 1)
 
 The instantiated object receives a ViewID from the server's pool.
 
@@ -870,6 +897,42 @@ The `RPC_NetworkViewID` method has:
 The `RPC_NetworkPlayer` method has:
 - Hash: `310ba632fe7649ab19`
 - Method index: `0xE0` = (36 - 1 - 7) × 4
+
+---
+
+## 15. Disconnect Cleanup (RemoveRPCs / DestroyPlayerObjects)
+
+### 15.1 Wire Protocol
+
+`Network.RemoveRPCs(player)` and `Network.DestroyPlayerObjects(player)` are
+**purely server-side operations**. They produce **no wire messages**.
+
+The only disconnect-related wire message is `0x15` (`ID_DISCONNECTION_NOTIFICATION`),
+sent by the disconnecting peer. After receiving this, the server performs
+cleanup internally:
+
+1. Remove all buffered RPCs associated with the disconnecting player
+2. Destroy all NetworkView objects owned by the disconnecting player
+3. Free the player's ViewID allocation range
+
+### 15.2 Verification
+
+Experiment: Unity server with `DisconnectCleanupExperiment`. Client connects,
+allocates ViewIDs, sends buffered RPC, then disconnects. Server calls
+`Network.RemoveRPCs(player)` and `Network.DestroyPlayerObjects(player)` in the
+`OnPlayerDisconnected` callback.
+
+Capture shows: client sends disconnect (last frame), server ACKs it. No
+additional frames from server after the cleanup calls. Both APIs complete
+synchronously with no wire traffic.
+
+### 15.3 Implementation Notes
+
+A Python server implementation should:
+- Clean up per-client state (ViewID allocations, delta state, group memberships)
+- Remove any buffered RPCs from the disconnecting player
+- The peer object (and its split packet assembler) is garbage-collected
+  when removed from the peer map
 
 ---
 

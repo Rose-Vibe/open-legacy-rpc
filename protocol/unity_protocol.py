@@ -546,18 +546,20 @@ def encode_instantiate_params(group, prefab_id_bits, position, rotation,
 
 # ── State Sync ──
 
-def encode_state_sync(view_id, timestamp, data_bs, is_first=False):
+def encode_state_sync(view_id, timestamp, data_bs, is_first=False,
+                      view_id_scope='scene'):
     """Encode a state sync message.
 
     data_bs: a BitStream containing the serialized field data.
+    view_id_scope: 'scene' or 'allocated'
     Returns (payload_bytes, total_bit_length).
     """
     bs = BitStream()
-    bs.write_u8(MSG_ID_RPC)  # same msg_id as RPC
-    bs.write_bytes(encode_view_id(view_id))
+    bs.write_u8(MSG_ID_RPC)
+    bs.write_bytes(b'\x00' * 6)  # 48-bit reserved field
     bs.write_u16_be(timestamp)
     bs.write_u8(0x80 if is_first else 0x7f)
-    bs.write_u16_be(0x0004)  # constant
+    bs.write_u16_be(encode_view_id_16(view_id_scope, view_id))
 
     data_bits = data_bs.bit_length
     for i in range(data_bits):
@@ -574,31 +576,37 @@ def decode_state_sync(payload, bit_length):
     bs = BitStream(payload, bit_length)
     result = {}
     result['msg_id'] = bs.read_u8()
-    result['view_id'] = decode_view_id_bits(bs)
+    result['_reserved'] = bs.read_bits(48)
     result['timestamp'] = bs.read_u16_be()
     result['flags'] = bs.read_u8()
     result['is_first'] = result['flags'] == 0x80
-    result['constant'] = bs.read_u16_be()
+    view_id_16 = bs.read_u16_be()
+    scope, vid = decode_view_id_16(view_id_16)
+    result['view_id'] = vid
+    result['view_id_scope'] = scope
+    result['view_id_raw'] = view_id_16
     result['data_bit_length'] = bit_length - 96
-    result['data_stream'] = bs  # positioned at data start
+    result['data_stream'] = bs
     return result
 
 
 def encode_delta_state_sync(view_id, timestamp, field_values, prev_values,
-                            field_widths, is_first=False):
+                            field_widths, is_first=False,
+                            view_id_scope='scene'):
     """Encode a ReliableDeltaCompressed state sync message.
 
     field_values: list of current field values (ints or floats)
     prev_values: list of previous field values (for dirty detection)
     field_widths: list of bit widths per field (all 32 in practice)
+    view_id_scope: 'scene' or 'allocated'
     Returns (payload_bytes, total_bit_length).
     """
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
-    bs.write_bytes(encode_view_id(view_id))
+    bs.write_bytes(b'\x00' * 6)  # 48-bit reserved field
     bs.write_u16_be(timestamp)
     bs.write_u8(0x80 if is_first else 0x7f)
-    bs.write_u16_be(0x0004)
+    bs.write_u16_be(encode_view_id_16(view_id_scope, view_id))
 
     data_bits = 0
     for i, (cur, prev, width) in enumerate(

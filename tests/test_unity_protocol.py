@@ -183,17 +183,18 @@ def test_state_sync_encode_decode_basic():
 
 
 def test_state_sync_encode_matches_capture():
-    """Encode state sync matching the known SerializeBasicExperiment capture."""
+    """Encode state sync with correct header layout."""
     data_bs = BitStream()
     data_bs.write_i32_be(42)
 
-    payload, bits = encode_state_sync(1, 0x09b7, data_bs, is_first=False)
-    # Header should be: 1b 000000000001 09b7 7f 0004
+    payload, bits = encode_state_sync(1, 0x09b7, data_bs, is_first=False,
+                                       view_id_scope='scene')
+    # Header: 1b 000000000000 09b7 7f [view_id_16]
     assert payload[0] == 0x1b
-    assert payload[1:7] == b'\x00\x00\x00\x00\x00\x01'
+    assert payload[1:7] == b'\x00\x00\x00\x00\x00\x00'  # reserved
     assert payload[7:9] == bytes.fromhex('09b7')
     assert payload[9] == 0x7f
-    assert payload[10:12] == bytes.fromhex('0004')
+    assert payload[10:12] == encode_view_id_16('scene', 1).to_bytes(2, 'big')
     assert payload[12:16] == bytes.fromhex('0000002a')
 
 

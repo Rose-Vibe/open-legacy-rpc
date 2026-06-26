@@ -49,12 +49,13 @@ class UnityClient:
         """Allocate a ViewID from the server-assigned range."""
         if not self.connected:
             return 0
-        view_id = self._raknet.viewid_base + self._viewid_counter
+        alloc_start = getattr(self._raknet, '_viewid_alloc_start', self._raknet.viewid_base)
+        view_id = alloc_start + self._viewid_counter
         self._viewid_counter += 1
         return view_id
 
-    def connect(self, host, port, timeout=5.0):
-        self._raknet.connect(host, port, timeout)
+    def connect(self, host, port, timeout=5.0, password=''):
+        self._raknet.connect(host, port, timeout, password=password)
 
     def disconnect(self):
         self._raknet.disconnect()
@@ -134,7 +135,7 @@ class UnityClient:
         handler = self._state_sync_handlers.get(view_id) or \
                   self._state_sync_handlers.get(None)
         if handler:
-            handler(result['data_stream'])
+            handler(result)
 
 
 class _BitMessage:

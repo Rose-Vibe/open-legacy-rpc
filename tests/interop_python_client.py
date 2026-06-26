@@ -28,8 +28,9 @@ def on_rpc_int(value):
     received_rpcs.append(('RPC_Int', value))
 
 
-def on_state_sync(data_stream):
-    val = data_stream.read_i32_be()
+def on_state_sync(result):
+    ds = result['data_stream']
+    val = ds.read_i32_be()
     log.info(f'Received state sync: {val}')
     received_syncs.append(val)
 

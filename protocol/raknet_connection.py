@@ -2,11 +2,14 @@
 RakNet 3.731 connection lifecycle — offline handshake, connected handshake,
 ping/pong, disconnect. Manages state machine for a single connection.
 """
+import logging
 import os
 import socket
 import struct
 import time
 import select
+
+log = logging.getLogger(__name__)
 
 from .raknet_transport import (
     OFFLINE_MAGIC, MTU_SIZE, Reliability, EncapsulatedMessage,
@@ -54,13 +57,14 @@ class RakNetClient:
         self._message_handlers = {}
         self._queued_messages = []
 
-    def connect(self, host, port, timeout=5.0):
+    def connect(self, host, port, timeout=5.0, password=''):
         """Connect to a RakNet server. Blocks until connected or timeout."""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setblocking(False)
         self.sock.bind(('', 0))
         self.local_addr = self.sock.getsockname()
         self.server_addr = (host, port)
+        self._password = password
         self.peer = RakNetPeer(self.sock, self.server_addr)
         self.state = ConnectionState.CONNECTING
 
@@ -171,6 +175,8 @@ class RakNetClient:
         buf.append(ID_CONNECTION_REQUEST)
         buf += OFFLINE_MAGIC
         buf += struct.pack('>Q', self._guid)
+        if self._password:
+            buf += self._password.encode('ascii')
         self.peer.send_message(bytes(buf), Reliability.RELIABLE)
 
     def _handle_connection_accepted(self, payload):
@@ -197,10 +203,16 @@ class RakNetClient:
         self.peer.send_message(ready, Reliability.RELIABLE_ORDERED)
 
     def _handle_player_assignment(self, payload):
-        if len(payload) >= 5:
-            self.player_index = struct.unpack('>I', payload[1:5])[0]
+        if len(payload) >= 13:
+            self.player_index = struct.unpack('>I', payload[9:13])[0]
         if len(payload) >= 17:
             self.viewid_base = struct.unpack('>I', payload[13:17])[0]
+        if len(payload) >= 25:
+            block_start = struct.unpack('>I', payload[21:25])[0]
+            self._viewid_alloc_start = block_start * self.viewid_base
+        else:
+            self._viewid_alloc_start = self.viewid_base
+        self._viewid_next = self._viewid_alloc_start
         self.state = ConnectionState.CONNECTED
 
     def _handle_ping(self, payload):
@@ -220,9 +232,11 @@ class RakNetClient:
 class RakNetServer:
     """Server-side RakNet listener that accepts connections."""
 
-    def __init__(self, port=7777, max_connections=4, viewid_stride=50):
+    def __init__(self, port=7777, max_connections=4, viewid_stride=50,
+                 password=''):
         self.port = port
         self.max_connections = max_connections
+        self._password = password
         self.viewid_stride = viewid_stride
         self.sock = None
         self.peers = {}  # addr -> RakNetPeer
@@ -358,6 +372,15 @@ class RakNetServer:
             self.peers[addr] = RakNetPeer(self.sock, addr)
 
     def _handle_connection_request(self, addr, payload):
+        if self._password:
+            # Password follows the OFFLINE_MAGIC(16) + guid(8) in the 0x04 request
+            pw_offset = 1 + 16 + 8  # msg_id + magic + guid
+            client_pw = payload[pw_offset:].decode('ascii', errors='replace')
+            if client_pw != self._password:
+                log.info("Rejected connection from %s: wrong password", addr)
+                self.peers.pop(addr, None)
+                return
+
         peer = self.peers[addr]
         local_ip = '127.0.0.1'
         local_port = self.port
@@ -381,10 +404,21 @@ class RakNetServer:
         self._next_player_index += 1
         self.player_indices[addr] = player_idx
 
-        viewid_base = player_idx * self.viewid_stride
+        # 0x81 format (from multi-client captures):
+        #   bytes 1-4:  constant 1 (scene/level marker)
+        #   bytes 5-8:  constant 0
+        #   bytes 9-12: player_index (1-based, increments per client)
+        #   bytes 13-16: viewid_stride (ViewIDs per block, default 50)
+        #   bytes 17-20: constant 2
+        #   bytes 21-24: viewid_block_start (player*2-1)
+        #   bytes 25-28: viewid_block_end (player*2)
+        # Client computes allocation start as: viewid_block_start * viewid_stride
+        block_start = player_idx * 2 - 1
+        block_end = player_idx * 2
         buf = struct.pack('>BIIIIIII',
                           ID_UNITY_PLAYER_ASSIGNMENT,
-                          player_idx, 0, 1, viewid_base, 2, 1, 2)
+                          1, 0, player_idx, self.viewid_stride,
+                          2, block_start, block_end)
         self.peers[addr].send_message(buf, Reliability.RELIABLE_ORDERED)
 
         if self._connect_handler:

@@ -253,19 +253,77 @@ allocations to route state sync and RPCs to the correct view owners.
 
 ---
 
+## Milestone 10h: ViewID Scaling Limits
+
+### Background
+
+With max_connections=4, each player gets 2 blocks of 50 = 100 ViewIDs.
+The stride stays at 50 regardless of max_connections. Questions:
+- Does Unity ever adjust stride for high player counts?
+- What happens when alloc_start exceeds 1000? 10000?
+- Does Unity refuse or cap max_connections?
+
+### Work
+
+1. **Experiment**: Python probe clients connecting to Unity servers with
+   max_connections = 4, 8, 16, 32, 64, 128, 512, 2048.
+
+2. **Log**: block_start, block_end, alloc_start for each player.
+
+3. **Document** the scaling behavior and any limits.
+
+### Results (COMPLETE)
+
+- Stride remains 50 for ALL max_connections values tested (4–2048)
+- Formula is always `block_start = player_index * 2 - 1`
+- Unity never refuses, adjusts, or caps
+- Player 512: alloc_start = 51150 — no issues
+- 2048 max_connections accepted; 100+ clients connected successfully
+- Some `RSAPublicKeyMismatch` errors at very high connection rates (benign)
+
+---
+
+## Milestone 10i: ViewID Over-Allocation
+
+### Background
+
+Each client gets a finite ViewID range. What happens when a client tries
+to allocate more ViewIDs than the range allows?
+
+### Work
+
+1. **Experiment**: Client allocates 200 ViewIDs (max_connections=4,
+   range = 100 ViewIDs).
+
+2. **Log**: Each allocated ViewID and any errors.
+
+### Results (COMPLETE)
+
+- Client gets blocks [1,2] = alloc range [50, 149] = 100 ViewIDs
+- First 100 allocations succeed (ViewIDs 50–149)
+- Allocation 100+ returns AllocatedID 0 (unassigned)
+- Unity logs: "Failed to allocate view id because no NetworkView's were
+  available to allocate from. You should increase the minimum client
+  NetworkViewID count."
+- No crash, no exception — just returns 0 and warns
+
+---
+
 ## Implementation Order
 
 ```
-10a (Multi-client)           — foundational, unblocks 10b/10g
-10b (RPCMode.Player)         — depends on 10a (needs 2+ clients)
-10g (ViewID ranges)          — can combine with 10a experiment
-10c (Large payloads)         — independent
-10d (Multiple views)         — independent
-10e (Password auth)          — independent
-10f (Disconnect cleanup)     — do after 10a (needs multi-client context)
+10a (Multi-client)           — COMPLETE
+10g (ViewID ranges)          — COMPLETE (combined with 10a)
+10h (ViewID scaling)         — COMPLETE
+10i (ViewID over-allocation) — COMPLETE
+10b (RPCMode.Player)         — COMPLETE (verified through M10a multi-client interop)
+10c (Large payloads)         — COMPLETE
+10d (Multiple views)         — COMPLETE
+10e (Password auth)          — COMPLETE (Python client/server password support + tests)
+10f (Disconnect cleanup)     — COMPLETE (RemoveRPCs/DestroyPlayerObjects are server-side only)
 ```
 
-Recommended: **10a+10g → 10b → 10c → 10d → 10e → 10f**
+Recommended: **10a+10g+10h+10i → 10b → 10c → 10d → 10e → 10f**
 
 10a and 10g share the same experiment (multi-client), so do them together.
 10b needs multi-client infrastructure from 10a. The rest are independent
