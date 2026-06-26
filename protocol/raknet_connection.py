@@ -45,7 +45,7 @@ class ConnectionState:
 class RakNetClient:
     """Client-side RakNet connection to a server."""
 
-    def __init__(self):
+    def __init__(self, unity_protocol=True):
         self.sock = None
         self.peer = None
         self.state = ConnectionState.DISCONNECTED
@@ -53,6 +53,7 @@ class RakNetClient:
         self.viewid_base = 0
         self.server_addr = None
         self.local_addr = None
+        self._unity_protocol = unity_protocol
         self._guid = struct.unpack('>Q', os.urandom(8))[0]
         self._message_handlers = {}
         self._queued_messages = []
@@ -199,8 +200,11 @@ class RakNetClient:
 
         self.peer.send_message(bytes(buf), Reliability.RELIABLE_ORDERED)
 
-        ready = struct.pack('>BI', ID_UNITY_PLAYER_READY, 1)
-        self.peer.send_message(ready, Reliability.RELIABLE_ORDERED)
+        if self._unity_protocol:
+            ready = struct.pack('>BI', ID_UNITY_PLAYER_READY, 1)
+            self.peer.send_message(ready, Reliability.RELIABLE_ORDERED)
+        else:
+            self.state = ConnectionState.CONNECTED
 
     def _handle_player_assignment(self, payload):
         if len(payload) >= 13:
@@ -233,11 +237,12 @@ class RakNetServer:
     """Server-side RakNet listener that accepts connections."""
 
     def __init__(self, port=7777, max_connections=4, viewid_stride=50,
-                 password=''):
+                 password='', unity_protocol=True):
         self.port = port
         self.max_connections = max_connections
         self._password = password
         self.viewid_stride = viewid_stride
+        self._unity_protocol = unity_protocol
         self.sock = None
         self.peers = {}  # addr -> RakNetPeer
         self.player_indices = {}  # addr -> player_index
@@ -340,6 +345,8 @@ class RakNetServer:
             self._handle_connection_request(addr, payload)
             return True
         elif msg_id == ID_NEW_INCOMING_CONNECTION:
+            if not self._unity_protocol and self._connect_handler:
+                self._connect_handler(addr, None)
             return True
         elif msg_id == ID_INTERNAL_PING:
             self._handle_ping(addr, payload)
@@ -347,7 +354,8 @@ class RakNetServer:
         elif msg_id == ID_CONNECTED_PONG:
             return True
         elif msg_id == ID_UNITY_PLAYER_READY:
-            self._handle_player_ready(addr, payload)
+            if self._unity_protocol:
+                self._handle_player_ready(addr, payload)
             return True
         elif msg_id == ID_DISCONNECTION_NOTIFICATION:
             self._handle_disconnect(addr)

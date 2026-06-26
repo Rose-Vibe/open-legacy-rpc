@@ -195,3 +195,28 @@ class BitStream:
         self.write_float_be(y)
         self.write_float_be(z)
         self.write_float_be(w)
+
+    def read_double_be(self):
+        bits = self.read_bits(64)
+        return struct.unpack('>d', struct.pack('>Q', bits))[0]
+
+    def write_double_be(self, val):
+        bits = struct.unpack('>Q', struct.pack('>d', val))[0]
+        self.write_bits(bits, 64)
+
+    def align_read_to_byte(self):
+        if self._pos & 7:
+            self._pos = (self._pos + 7) & ~7
+
+    def align_write_to_byte(self):
+        if self._pos & 7:
+            padding = 8 - (self._pos & 7)
+            self.write_bits(0, padding)
+
+    def read_aligned_bytes(self, n):
+        self.align_read_to_byte()
+        return self.read_bytes(n)
+
+    def write_aligned_bytes(self, data):
+        self.align_write_to_byte()
+        self.write_bytes(data)
