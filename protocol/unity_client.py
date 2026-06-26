@@ -14,7 +14,7 @@ from .raknet_connection import (
 from .raknet_transport import Reliability
 from .unity_protocol import (
     RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
-    decode_rpc, decode_state_sync, METHOD_SIGNATURES,
+    decode_rpc, decode_state_sync, METHOD_SIGNATURES, is_rpc,
 )
 from .bitstream import BitStream
 
@@ -66,7 +66,8 @@ class UnityClient:
 
     def on_state_sync(self, view_id, handler):
         """Register a handler for incoming state sync.
-        handler receives a BitStream positioned at the data start."""
+        handler receives a BitStream positioned at the data start.
+        Pass view_id=None to handle all views."""
         self._state_sync_handlers[view_id] = handler
 
     def send_rpc(self, method_name, params=None, view_id=1,
@@ -95,7 +96,10 @@ class UnityClient:
                 if reliability == Reliability.UNRELIABLE_SEQUENCED:
                     self._handle_state_sync(payload, bit_length)
                 elif reliability == Reliability.RELIABLE_ORDERED:
-                    self._handle_rpc(payload, bit_length)
+                    if is_rpc(payload):
+                        self._handle_rpc(payload, bit_length)
+                    else:
+                        self._handle_state_sync(payload, bit_length)
 
     def run(self, duration=None, tick_rate=15):
         """Run the client poll loop."""
@@ -127,8 +131,10 @@ class UnityClient:
                         exc_info=True)
             return
         view_id = result['view_id']
-        if view_id in self._state_sync_handlers:
-            self._state_sync_handlers[view_id](result['data_stream'])
+        handler = self._state_sync_handlers.get(view_id) or \
+                  self._state_sync_handlers.get(None)
+        if handler:
+            handler(result['data_stream'])
 
 
 class _BitMessage:

@@ -455,6 +455,15 @@ def _decode_string_param(bs):
     return decoded.decode('ascii', errors='replace')
 
 
+def is_rpc(payload):
+    """Distinguish RPC from ReliableDeltaCompressed state sync.
+
+    Both share msg_id 0x1b and can use RELIABLE_ORDERED. Byte 9 is the RPC
+    marker (0x0b) for RPCs, or the state sync flags byte (0x80/0x7f).
+    """
+    return len(payload) >= 10 and payload[9] == 0x0b
+
+
 # ── Network.Instantiate ──
 
 

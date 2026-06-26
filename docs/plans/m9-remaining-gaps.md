@@ -134,7 +134,7 @@ Deferred cleanup items from the M3 plan's milestone 7.
 
 ---
 
-## Milestone 9e: End-to-End Interop Verification
+## Milestone 9e: End-to-End Interop Verification — COMPLETE
 
 ### Background
 

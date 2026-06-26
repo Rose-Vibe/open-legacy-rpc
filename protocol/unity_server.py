@@ -15,7 +15,7 @@ from .unity_protocol import (
     RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
     decode_rpc, decode_state_sync, encode_state_sync,
     encode_delta_state_sync,
-    METHOD_SIGNATURES,
+    METHOD_SIGNATURES, is_rpc,
 )
 from .bitstream import BitStream
 
@@ -207,8 +207,12 @@ class UnityServer:
         messages = self._raknet.poll(timeout)
         for addr, msg_id, payload, reliability, bit_length in messages:
             if msg_id == ID_UNITY_RPC_OR_SYNC:
-                if reliability == Reliability.RELIABLE_ORDERED:
-                    self._handle_rpc(addr, payload, bit_length)
+                if reliability == Reliability.UNRELIABLE_SEQUENCED:
+                    pass  # state sync from client (not typical)
+                elif reliability == Reliability.RELIABLE_ORDERED:
+                    if is_rpc(payload):
+                        self._handle_rpc(addr, payload, bit_length)
+                    # else: ReliableDeltaCompressed state sync — not handled server-side
 
     def run(self, duration=None):
         """Run the server poll loop."""

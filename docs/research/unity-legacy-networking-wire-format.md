@@ -399,9 +399,14 @@ Huffman bitstream until the expected length is consumed.
 
 ## 4. State Sync Wire Format
 
-State sync (OnSerializeNetworkView) uses msg_id `0x1b` with
-UNRELIABLE_SEQUENCED reliability. Distinguished from RPCs by the
-RakNet reliability level: rel=1 for state sync, rel=3 for RPCs.
+State sync (OnSerializeNetworkView) uses msg_id `0x1b`. The default
+mode uses UNRELIABLE_SEQUENCED reliability, while ReliableDeltaCompressed
+mode uses RELIABLE_ORDERED — the same as RPCs.
+
+**Disambiguating RPCs from state sync when both use RELIABLE_ORDERED:**
+Byte 9 (the 10th byte) differs: RPCs always have `0x0b` (the marker byte),
+while state sync has the flags byte (`0x80` for first message, `0x7f` for
+subsequent). This check is necessary for correct dispatch.
 
 ### 4.1 Header (96 bits = 12 bytes)
 
