@@ -59,8 +59,27 @@ work correctly when our server sends 0x2000 regardless of which class the
 RPC targets. The field is implemented as configurable (`userRpcConstant`
 parameter) with 0x2000 as the default.
 
-## Further Investigation
+## Experiment Results (same day)
 
-To definitively determine the encoding, create an experiment with a second
-MonoBehaviour subclass that has [RPC] methods, in addition to Loader, and
-observe whether the constant differs between them.
+Four experiments confirmed the constant is **per-NetworkView scene order**
+for scene-baked views, and a **different value for allocated views**:
+
+| NetworkView | Type | Constant |
+|---|---|---|
+| Loader (SceneID 1) | Scene-baked | 0x0002 |
+| SecondRpcBehaviour (SceneID 2) | Scene-baked | 0x0004 |
+| InheritedRpcDerived (SceneID 3) | Scene-baked | 0x0006 |
+| SecondRpcBehaviour (AllocatedID 50) | Allocated | 0x2640 |
+
+Scene-baked constants follow `sceneViewIndex * 2`. The allocated view
+constant (0x2640) matches Distance's outlier exactly, confirming that
+Distance's `NetworkInstancedEventTransceiver` uses an allocated NetworkView.
+
+## Relay Format
+
+When the server relays an RPCMode.Others RPC to other clients:
+- Counter is re-assigned (server's own sequence)
+- Mode is preserved (Others=1 stays Others=1)
+- 5 zero bits are appended after the params
+- The `remaining` field increases by 5 to account for the extra bits
+- All other fields (constant, tag, method hash) are preserved
