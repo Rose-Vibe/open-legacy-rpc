@@ -53,3 +53,41 @@ export function decodeViewId16(val16: number): ViewId {
   }
   return { scope: 'scene', id: val16 >> 2 };
 }
+
+/**
+ * Encode a 16-bit RPC routing constant from a ViewId.
+ *
+ * This is the value Unity uses to route incoming RPCs to the correct
+ * NetworkView. It uses a different bit layout than encodeViewId16
+ * (the RPC parameter format).
+ *
+ * - Internal:  0x0000
+ * - Scene:     sceneViewIndex << 1        (bit 13 = 0)
+ * - Allocated: 0x2000 | (allocatedID << 5) (bit 13 = 1)
+ */
+export function rpcViewConstant(scope: 'scene' | 'allocated', id: number): number {
+  if (scope === 'scene') {
+    if (id < 0 || id > 4095) {
+      throw new Error(`scene ViewID out of range: ${id} (must be 0-4095)`);
+    }
+    return id << 1;
+  }
+  if (id < 0 || id > 255) {
+    throw new Error(`allocated ViewID out of range: ${id} (must be 0-255)`);
+  }
+  return 0x2000 | (id << 5);
+}
+
+/** Encode a routing constant from a ViewId struct. */
+export function rpcViewConstantFromVid(vid: ViewId): number {
+  return rpcViewConstant(vid.scope, vid.id);
+}
+
+/** Decode a 16-bit RPC routing constant back to a ViewId. */
+export function decodeRpcViewConstant(constant: number): ViewId | null {
+  if (constant === 0) return null;
+  if (constant & 0x2000) {
+    return { scope: 'allocated', id: (constant & 0x1FFF) >> 5 };
+  }
+  return { scope: 'scene', id: constant >> 1 };
+}

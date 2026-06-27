@@ -261,6 +261,34 @@ def decode_view_id_16(val16):
         return ('scene', val16 >> 2)
 
 
+def rpc_view_constant(scope, id_value):
+    """Encode a 16-bit RPC routing constant from a view scope and ID.
+
+    Unity uses this to route incoming RPCs to the correct NetworkView.
+    Different bit layout than encode_view_id_16 (the RPC parameter format).
+
+    - Internal:  0x0000
+    - Scene:     id_value << 1        (bit 13 = 0)
+    - Allocated: 0x2000 | (id_value << 5) (bit 13 = 1)
+    """
+    if scope == 'scene':
+        return id_value << 1
+    else:
+        return 0x2000 | (id_value << 5)
+
+
+def decode_rpc_view_constant(constant):
+    """Decode a 16-bit RPC routing constant.
+
+    Returns (scope, id_value) or None for internal (0x0000).
+    """
+    if constant == 0:
+        return None
+    if constant & 0x2000:
+        return ('allocated', (constant & 0x1FFF) >> 5)
+    return ('scene', constant >> 1)
+
+
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
                           mode=RPCMode.Server, user_rpc_constant=None,
                           relay=False):

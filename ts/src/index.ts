@@ -21,6 +21,9 @@ export {
   encodeViewId16,
   decodeViewId16,
   viewIdToInt,
+  rpcViewConstant,
+  rpcViewConstantFromVid,
+  decodeRpcViewConstant,
 } from './unity/view-id.js';
 export type { ViewId } from './unity/view-id.js';
 export {
