@@ -53,3 +53,7 @@ export type {
   DecodedDeltaSync,
   StateSyncField,
 } from './unity/state-sync.js';
+export { UnityServer } from './unity/server.js';
+export type { UnityServerOptions } from './unity/server.js';
+export { UnityClient } from './unity/client.js';
+export type { ConnectOptions } from './unity/client.js';
