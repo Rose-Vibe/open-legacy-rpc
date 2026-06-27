@@ -18,6 +18,20 @@ import {
   decodeDeltaStateSync,
 } from '../src/unity/state-sync.js';
 import type { StateSyncField } from '../src/unity/state-sync.js';
+import {
+  encodeUpdateRow,
+  decodeUpdateRow,
+  encodeQueryRequest,
+  decodeQueryRequest,
+  encodeQueryReply,
+  decodeQueryReply,
+  encodeRemoveRow,
+  decodeRemoveRow,
+  NUMERIC,
+  STRING,
+  BINARY,
+} from '../src/master/serialization.js';
+import type { Cell, Filter, Column, Row } from '../src/master/serialization.js';
 
 interface TestCase {
   testInfo: { category: string; [k: string]: unknown };
@@ -385,6 +399,136 @@ handlers.set('deltaSyncDecode', (inp) => {
     dirtyFlags: d.dirtyFlags,
     fieldValues: d.fieldValues,
   };
+});
+
+// ── Master protocol helpers ──
+
+const TYPE_INT: Record<string, number> = { NUMERIC, STRING, BINARY };
+const TYPE_STR: Record<number, string> = { [NUMERIC]: 'NUMERIC', [STRING]: 'STRING', [BINARY]: 'BINARY' };
+const OP_INT: Record<string, number> = {
+  EQUAL: 0, NOT_EQUAL: 1, GREATER_THAN: 2, GREATER_THAN_EQ: 3,
+  LESS_THAN: 4, LESS_THAN_EQ: 5, IS_EMPTY: 6, NOT_EMPTY: 7,
+};
+const OP_STR: Record<number, string> = Object.fromEntries(
+  Object.entries(OP_INT).map(([k, v]) => [v, k]),
+);
+
+interface CellInput { name: string; type: string; value: number | string | null }
+interface FilterInput { name: string; type: string; operation: string; value: number | string | null }
+interface ColumnInput { name: string; type: string }
+interface RowInput { key: number; cells: Record<string, number | string | null> }
+
+function cellsToInternal(cells: CellInput[]): Cell[] {
+  return cells.map((c) => {
+    let val: number | string | Uint8Array | null = c.value;
+    if (c.type === 'BINARY' && typeof val === 'string') val = hexToBytes(val);
+    return { name: c.name, type: TYPE_INT[c.type]!, value: val };
+  });
+}
+
+function filtersToInternal(filters: FilterInput[]): Filter[] {
+  return filters.map((f) => {
+    let val: number | string | Uint8Array | null = f.value;
+    if (f.type === 'BINARY' && typeof val === 'string') val = hexToBytes(val);
+    return { name: f.name, type: TYPE_INT[f.type]!, operation: OP_INT[f.operation]!, value: val };
+  });
+}
+
+function rowsToInternal(rows: RowInput[], columns: ColumnInput[]): Row[] {
+  return rows.map((row) => {
+    const cells: Record<string, number | string | Uint8Array | null> = {};
+    for (const col of columns) {
+      if (col.name in row.cells) {
+        let val: number | string | Uint8Array | null = row.cells[col.name] ?? null;
+        if (col.type === 'BINARY' && typeof val === 'string') val = hexToBytes(val);
+        cells[col.name] = val;
+      }
+    }
+    return { key: row.key, cells };
+  });
+}
+
+// ── Master protocol handlers ──
+
+handlers.set('updateRow', (inp) => {
+  const cells = cellsToInternal(inp['cells'] as CellInput[]);
+  const data = encodeUpdateRow(
+    inp['tableName'] as string, cells,
+    inp['updateMode'] as number,
+    (inp['rowId'] as number | null) ?? null,
+    (inp['password'] as string | null) ?? null,
+  );
+  return { dataHex: bytesToHex(data) };
+});
+
+handlers.set('updateRowDecode', (inp) => {
+  const d = decodeUpdateRow(hexToBytes(inp['dataHex'] as string));
+  const cells = d.cells.map((c) => ({
+    name: c.name,
+    type: TYPE_STR[c.type]!,
+    value: c.value instanceof Uint8Array ? bytesToHex(c.value) : c.value,
+  }));
+  return { tableName: d.table, updateMode: d.updateMode, rowId: d.rowId, cells };
+});
+
+handlers.set('queryRequest', (inp) => {
+  const filters = filtersToInternal((inp['filters'] as FilterInput[]) ?? []);
+  const colSubset = (inp['columnSubset'] as string[]) ?? [];
+  const rowIds = (inp['rowIds'] as number[]) ?? [];
+  const data = encodeQueryRequest(
+    inp['tableName'] as string,
+    colSubset.length > 0 ? colSubset : null,
+    filters.length > 0 ? filters : null,
+    rowIds.length > 0 ? rowIds : null,
+    (inp['password'] as string | null) ?? null,
+  );
+  return { dataHex: bytesToHex(data) };
+});
+
+handlers.set('queryRequestDecode', (inp) => {
+  const d = decodeQueryRequest(hexToBytes(inp['dataHex'] as string));
+  const filters = d.filters.map((f) => ({
+    name: f.name,
+    type: TYPE_STR[f.type] ?? String(f.type),
+    operation: OP_STR[f.operation] ?? String(f.operation),
+    value: f.value instanceof Uint8Array ? bytesToHex(f.value) : f.value,
+  }));
+  return { tableName: d.table, columnSubset: d.columnSubset, filters, rowIds: d.rowIds };
+});
+
+handlers.set('queryReply', (inp) => {
+  const colInputs = inp['columns'] as ColumnInput[];
+  const columns: Column[] = colInputs.map((c) => ({ name: c.name, type: TYPE_INT[c.type]! }));
+  const rows = rowsToInternal(inp['rows'] as RowInput[], colInputs);
+  const data = encodeQueryReply(columns, rows);
+  return { dataHex: bytesToHex(data) };
+});
+
+handlers.set('queryReplyDecode', (inp) => {
+  const d = decodeQueryReply(hexToBytes(inp['dataHex'] as string));
+  const columns = d.columns.map((c) => ({ name: c.name, type: TYPE_STR[c.type]! }));
+  const rows = d.rows.map((row) => {
+    const cells: Record<string, number | string | null> = {};
+    for (const [k, v] of Object.entries(row.cells)) {
+      cells[k] = v instanceof Uint8Array ? bytesToHex(v) : v;
+    }
+    return { key: row.key, cells };
+  });
+  return { columns, rows };
+});
+
+handlers.set('removeRow', (inp) => {
+  const data = encodeRemoveRow(
+    inp['tableName'] as string,
+    inp['rowId'] as number,
+    (inp['password'] as string | null) ?? null,
+  );
+  return { dataHex: bytesToHex(data) };
+});
+
+handlers.set('removeRowDecode', (inp) => {
+  const d = decodeRemoveRow(hexToBytes(inp['dataHex'] as string));
+  return { tableName: d.table, rowId: d.rowId };
 });
 
 // ── Main ──
