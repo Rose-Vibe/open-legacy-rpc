@@ -62,6 +62,59 @@ GOLDEN_TAG = {
     },
 }
 
+GOLDEN_MODES = {
+    'sub_int_42_others': {
+        'hex': '1b00000000000100000b5400000033200010000002a0',
+        'bits': 172,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Others},
+    },
+    'fu_int_42_others': {
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000033200010000002a',
+        'bits': 264,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Others},
+    },
+    'sub_int_42_all': {
+        'hex': '1b00000000000100000b5400000033200020000002a0',
+        'bits': 172,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.All},
+    },
+}
+
+GOLDEN_CONSTANT = {
+    'sub_int_42_const2640': {
+        'hex': '1b00000000000100000b5400000033264000000002a0',
+        'bits': 172,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Server},
+        'constant': 0x2640,
+    },
+    'fu_int_42_const2640': {
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000033264000000002a',
+        'bits': 264,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Server},
+        'constant': 0x2640,
+    },
+}
+
+GOLDEN_RELAY = {
+    'sub_int_42_relay': {
+        'hex': '1b00000000000100000b5400000038200010000002a000',
+        'bits': 177,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Others},
+    },
+    'fu_int_42_relay': {
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000038200010000002a00',
+        'bits': 269,
+        'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+                   'rpcCounter': 0, 'mode': RPCMode.Others},
+    },
+}
+
 
 def _encode(entry, first_use=False):
     p = entry['params']
@@ -115,6 +168,92 @@ def test_first_use_with_method_tag_matches_ts():
         assert bits == entry['bits']
     finally:
         METHOD_TAG_MAP.pop(name, None)
+
+
+def test_subsequent_others_mode_matches_ts():
+    data, bits = _encode(GOLDEN_MODES['sub_int_42_others'])
+    assert data.hex() == GOLDEN_MODES['sub_int_42_others']['hex']
+    assert bits == GOLDEN_MODES['sub_int_42_others']['bits']
+
+
+def test_first_use_others_mode_matches_ts():
+    data, bits = _encode(GOLDEN_MODES['fu_int_42_others'], first_use=True)
+    assert data.hex() == GOLDEN_MODES['fu_int_42_others']['hex']
+    assert bits == GOLDEN_MODES['fu_int_42_others']['bits']
+
+
+def test_subsequent_all_mode_matches_ts():
+    data, bits = _encode(GOLDEN_MODES['sub_int_42_all'])
+    assert data.hex() == GOLDEN_MODES['sub_int_42_all']['hex']
+    assert bits == GOLDEN_MODES['sub_int_42_all']['bits']
+
+
+def test_subsequent_custom_constant_matches_ts():
+    entry = GOLDEN_CONSTANT['sub_int_42_const2640']
+    p = entry['params']
+    data, bits = encode_rpc_subsequent(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        user_rpc_constant=entry['constant'])
+    assert data.hex() == entry['hex']
+    assert bits == entry['bits']
+
+
+def test_first_use_custom_constant_matches_ts():
+    entry = GOLDEN_CONSTANT['fu_int_42_const2640']
+    p = entry['params']
+    data, bits = encode_rpc_first_use(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        user_rpc_constant=entry['constant'])
+    assert data.hex() == entry['hex']
+    assert bits == entry['bits']
+
+
+def test_subsequent_relay_matches_ts():
+    entry = GOLDEN_RELAY['sub_int_42_relay']
+    p = entry['params']
+    data, bits = encode_rpc_subsequent(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        relay=True)
+    assert data.hex() == entry['hex']
+    assert bits == entry['bits']
+
+
+def test_first_use_relay_matches_ts():
+    entry = GOLDEN_RELAY['fu_int_42_relay']
+    p = entry['params']
+    data, bits = encode_rpc_first_use(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        relay=True)
+    assert data.hex() == entry['hex']
+    assert bits == entry['bits']
+
+
+def test_relay_adds_5_bits():
+    """Relay format should be exactly 5 bits longer than non-relay."""
+    p = {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
+         'rpcCounter': 0, 'mode': RPCMode.Others}
+    _, normal_bits = encode_rpc_subsequent(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'])
+    _, relay_bits = encode_rpc_subsequent(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        relay=True)
+    assert relay_bits - normal_bits == 5
+
+    _, normal_bits_fu = encode_rpc_first_use(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'])
+    _, relay_bits_fu = encode_rpc_first_use(
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        relay=True)
+    assert relay_bits_fu - normal_bits_fu == 5
+
+
+def test_relay_decodes_correctly():
+    """Relay-encoded RPCs should still decode with correct params."""
+    entry = GOLDEN_RELAY['sub_int_42_relay']
+    raw = bytes.fromhex(entry['hex'])
+    decoded = decode_rpc(raw, entry['bits'])
+    assert decoded['rpc_counter'] == 0
+    assert decoded['method_name'] == 'RPC_Int'
 
 
 def test_ts_golden_decodes_correctly():

@@ -191,11 +191,12 @@ receiver has already cached the method from the first-use message.
 | 80 | 1 | first_use = 0 |
 | 81–87 | 7 | method_index (7 bits; actual byte = `index & 0xFE`) |
 | 88–103 | 16 | zeros |
-| 104–119 | 16 | remaining_bit_count = total_bit_length - 121 (uint16 BE) |
-| 120–135 | 16 | constant `0x0002` |
+| 104–119 | 16 | remaining_bit_count = total_bit_length - 121 (uint16 BE; +5 if relayed) |
+| 120–135 | 16 | user_rpc_constant (see §3.6) |
 | 136–139 | 4 | RPCMode |
 | 140 | 0 or 1 | target bit (present only when RPCMode = Player) |
 | 140/141+ | var | parameters |
+| after params | 0 or 5 | relay padding (see §3.7) |
 
 ### 3.2.1 Method Index Derivation
 
@@ -247,10 +248,11 @@ name hash so the receiver can register it.
 | after hash +0 | 4 | method_tag (unknown derivation, values 0/4/8/C) |
 | +4 | 16 | zeros |
 | +20 | 16 | remaining_bit_count = param_bits + 19 + target_bits |
-| +36 | 16 | constant = 0x0002 |
+| +36 | 16 | user_rpc_constant (see §3.6) |
 | +52 | 4 | RPCMode |
 | +56 | 0 or 1 | target bit (present only when RPCMode = Player) |
 | +56/57 | var | parameters |
+| after params | 0 or 5 | relay padding (see §3.7) |
 
 The `length_indicator` at bit 104 encodes the total size of the method
 identifier in nibbles. The method identifier consists of a 48-bit class
@@ -269,12 +271,13 @@ format's suffix (both share the zeros + remaining_count + constant pattern):
 |--------|-------|-------|-------------|
 | 0 | 4 | method_tag | Method-specific, constant across sessions. Values observed: 0x0, 0x4, 0x8, 0xC. Derivation unknown (not a simple function of method name, hash, .NET metadata token, or parameter types). |
 | 4 | 16 | zeros | Always 0 |
-| 20 | 16 | remaining_bit_count | `param_bits + 19 + target_bits` (where target_bits = 1 for RPCMode.Player, 0 otherwise). Same formula as subsequent-use. |
-| 36 | 16 | constant | `0x0002` — identical to subsequent-use format |
+| 20 | 16 | remaining_bit_count | `param_bits + 19 + target_bits + relay_bits` (where target_bits = 1 for RPCMode.Player, 0 otherwise; relay_bits = 5 if relayed, 0 otherwise). Same formula as subsequent-use. |
+| 36 | 16 | user_rpc_constant | Same value as subsequent-use (see §3.6) |
 
 The `remaining_bit_count` tells the receiver how many bits follow after
 a fixed reference point (19 bits before params = RPCMode(4) + constant(16) - 1).
 This is the same value as `total_bits - 121` in subsequent-use encoding.
+When the message is a relay (§3.7), add 5 to account for the relay padding.
 
 Unity accepts `method_tag = 0` when receiving first-use RPCs, so an encoder
 that sets it to 0 will function correctly. However, subsequent-use encoding
@@ -359,7 +362,76 @@ padding between them.
 | NetworkPlayer | int32 BE (player index) | 32 |
 | NetworkViewID | 16-bit packed (see §14) | 16 |
 
-### 3.6 WriteCompressed\<uint32\>
+### 3.6 User RPC Constant
+
+The 16-bit `user_rpc_constant` field distinguishes user RPCs from internal
+RPCs and encodes the source NetworkView's identity:
+
+| Value | Meaning |
+|-------|---------|
+| `0x0000` | Internal RPC (e.g. `__RPCNetworkInstantiate`) |
+| `sceneViewIndex × 2` | User RPC from a scene-baked NetworkView |
+| (varies) | User RPC from a runtime-allocated NetworkView |
+
+**Scene-baked views** use a formula based on the view's scene order:
+
+```
+user_rpc_constant = sceneViewIndex × 2
+```
+
+Where `sceneViewIndex` is the 1-based index of the NetworkView in the
+scene hierarchy. The first scene-baked view produces `0x0002`, the second
+`0x0004`, the third `0x0006`, etc.
+
+**Allocated views** (created via `Network.Instantiate` or
+`Network.AllocateViewID`) produce a different value. Observed:
+`AllocatedID:50` → `0x2640`. The exact derivation for allocated views
+is unknown, but it is per-class (all RPCs from the same MonoBehaviour
+subclass share the same constant) and consistent across Unity versions.
+
+The constant is also per-class, not per-method: all `[RPC]` methods on
+the same MonoBehaviour produce the same constant value.
+
+**Receivers do not validate this field strictly.** A server implementation
+can use a single default value (e.g. `0x2000`) and clients will accept
+the RPCs. The field is implemented as configurable (`userRpcConstant`
+parameter) for correctness when needed.
+
+Verified values:
+
+| NetworkView | Type | Constant |
+|-------------|------|----------|
+| SceneID 1 (Loader) | Scene-baked | `0x0002` |
+| SceneID 2 (SecondRpcBehaviour) | Scene-baked | `0x0004` |
+| SceneID 3 (InheritedRpcDerived) | Scene-baked | `0x0006` |
+| AllocatedID 50 | Allocated | `0x2640` |
+
+### 3.7 Relay Format
+
+When the server relays an RPC to other clients (e.g. for RPCMode.Others
+or RPCMode.All), the relayed message differs from the original:
+
+1. **Counter is re-assigned** — the server uses its own per-client
+   RPC sequence counter, not the original sender's counter.
+2. **Mode is preserved** — `Others` (1) stays `Others` (1).
+3. **5 zero bits are appended** after the parameters.
+4. **The `remaining` field increases by 5** to account for the extra bits.
+5. All other fields (constant, tag, method hash) are preserved.
+
+The relay padding increases the total bit length by exactly 5 bits.
+For example, a subsequent-use `RPC_Int(42)` with mode=Others is 172 bits
+without relay and 177 bits with relay.
+
+An encoder supporting relay adds a `relay` flag:
+```
+if relay:
+    remaining += 5
+    total_bits += 5
+    # after writing params:
+    write_bits(0, 5)
+```
+
+### 3.8 WriteCompressed\<uint32\>
 
 RakNet's compressed write for uint32, with DoEndianSwap=true (big-endian
 on wire for x86).
@@ -379,7 +451,7 @@ For the final (most significant) byte, there's a half-byte optimization:
 - Byte 0 (MSB) = 0x38 → top nibble = 0x3 ≠ 0 → flag=0, write 8 bits
 - Wire: `1 1 1 0 00111000` = 12 bits
 
-### 3.7 Huffman String Encoding
+### 3.9 Huffman String Encoding
 
 Strings in RPCs use RakNet's StringCompressor with the
 `englishCharacterFrequencies` table. The encoded bitstream uses a
@@ -743,7 +815,7 @@ use the same 0x1b message format as user RPCs with one key difference:
 
 | Field | User RPCs | Internal RPCs |
 |-------|-----------|---------------|
-| constant (16 bits) | `0x0002` | `0x0000` |
+| user_rpc_constant (16 bits) | Per-view (see §3.6) | `0x0000` |
 
 The method identification (GUID + hash) uses the same Huffman encoding
 algorithm as user RPCs. Internal method names are prefixed with `__RPC`.

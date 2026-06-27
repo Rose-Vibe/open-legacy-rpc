@@ -718,6 +718,86 @@ describe('Encoding edge cases', () => {
   });
 });
 
+describe('RPC modes and relay', () => {
+  it('Others mode encodes mode=1 in wire format', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Others,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.rpcMode).toBe('Others');
+    expect(decoded.params).toEqual([42]);
+  });
+
+  it('All mode encodes mode=2 in wire format', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.All,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.rpcMode).toBe('All');
+    expect(decoded.params).toEqual([42]);
+  });
+
+  it('relay=true adds exactly 5 bits to subsequent RPC', () => {
+    const normal = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+    });
+    const relay = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+    });
+    expect(relay.bitLength - normal.bitLength).toBe(5);
+  });
+
+  it('relay=true adds exactly 5 bits to first-use RPC', () => {
+    const normal = encodeRpcFirstUse({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+    });
+    const relay = encodeRpcFirstUse({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+    });
+    expect(relay.bitLength - normal.bitLength).toBe(5);
+  });
+
+  it('relay RPC still decodes correctly', () => {
+    const relay = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+    });
+    const decoded = decodeRpc(relay.data, relay.bitLength);
+    expect(decoded.methodName).toBe('RPC_Int');
+    expect(decoded.rpcCounter).toBe(0);
+    expect(decoded.rpcMode).toBe('Others');
+  });
+
+  it('userRpcConstant overrides default 0x2000', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1, rpcCounter: 0, mode: RpcMode.Server,
+      userRpcConstant: 0x2640,
+    });
+    const bits = [...encoded.data].map(b => b.toString(2).padStart(8, '0')).join('');
+    const constVal = parseInt(bits.slice(120, 136), 2);
+    expect(constVal).toBe(0x2640);
+  });
+});
+
 describe('Malformed packet resilience', () => {
   it('decodeRpc throws BitStreamError on truncated payload', () => {
     expect(() => decodeRpc(new Uint8Array([0x1b, 0x00]), 16)).toThrow();

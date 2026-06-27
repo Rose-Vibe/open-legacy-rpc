@@ -130,6 +130,7 @@ export interface RpcEncodeOptions {
   rpcCounter: number;
   mode: RpcMode;
   userRpcConstant?: number;
+  relay?: boolean;
 }
 
 /** Encode a subsequent-use RPC (method already registered on receiver). */
@@ -147,8 +148,9 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   encodeParams(paramBs, sig, opts.params);
   const paramBits = paramBs.bitLength;
 
+  const relayBits = opts.relay ? 5 : 0;
   const targetBits = opts.mode === RpcMode.Player ? 1 : 0;
-  const totalBits = 140 + targetBits + paramBits;
+  const totalBits = 140 + targetBits + paramBits + relayBits;
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
@@ -169,6 +171,9 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
     bs.writeBit(0);
   }
   copyBits(paramBs, bs, paramBits);
+  if (opts.relay) {
+    bs.writeBits(0, 5);
+  }
 
   return { data: bs.toBytes(), bitLength: totalBits };
 }
@@ -188,9 +193,10 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   const paramBits = paramBs.bitLength;
 
   const hashExtraBits = methodIdBits - 48;
+  const relayBits = opts.relay ? 5 : 0;
   const targetBits = opts.mode === RpcMode.Player ? 1 : 0;
   const paramStart = 160 + hashExtraBits + 52 + 4 + targetBits;
-  const totalBits = paramStart + paramBits;
+  const totalBits = paramStart + paramBits + relayBits;
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
@@ -207,7 +213,7 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeU8(lengthIndicator);
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
-  const remainingCount = paramBits + 19 + targetBits;
+  const remainingCount = paramBits + 19 + targetBits + relayBits;
   const methodTag = METHOD_TAG_MAP.get(opts.methodName) ?? 0;
   bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);
@@ -219,6 +225,9 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
     bs.writeBit(0);
   }
   copyBits(paramBs, bs, paramBits);
+  if (opts.relay) {
+    bs.writeBits(0, 5);
+  }
 
   return { data: bs.toBytes(), bitLength: totalBits };
 }

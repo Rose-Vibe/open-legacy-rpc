@@ -72,7 +72,8 @@ class UnityClient:
         self._state_sync_handlers[view_id] = handler
 
     def send_rpc(self, method_name, params=None, view_id=1,
-                 mode=RPCMode.Server, user_rpc_constant=None):
+                 mode=RPCMode.Server, user_rpc_constant=None,
+                 relay=False):
         """Send an RPC to the server."""
         params = params or []
         counter = self._rpc_counter
@@ -81,12 +82,12 @@ class UnityClient:
         if method_name not in self._rpc_sent_methods:
             payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant)
+                user_rpc_constant=user_rpc_constant, relay=relay)
             self._rpc_sent_methods.add(method_name)
         else:
             payload, bits = encode_rpc_subsequent(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant)
+                user_rpc_constant=user_rpc_constant, relay=relay)
 
         msg = _make_bit_message(payload, bits, Reliability.RELIABLE_ORDERED)
         self._raknet.send_message(msg.payload, msg.reliability)

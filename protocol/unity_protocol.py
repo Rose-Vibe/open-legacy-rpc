@@ -250,7 +250,8 @@ def decode_view_id_16(val16):
 
 
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
-                          mode=RPCMode.Server, user_rpc_constant=None):
+                          mode=RPCMode.Server, user_rpc_constant=None,
+                          relay=False):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
     method_index = METHOD_INDEX_MAP.get(method_name)
     if method_index is None:
@@ -262,8 +263,9 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     param_data = param_bs.to_bytes()
     param_bits = param_bs.bit_length
 
+    relay_bits = 5 if relay else 0
     target_bits = 1 if mode == RPCMode.Player else 0
-    total_bits = 140 + target_bits + param_bits
+    total_bits = 140 + target_bits + param_bits + relay_bits
 
     bs = BitStream()
     # msg_id
@@ -295,12 +297,15 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     for i in range(param_bs.bit_length):
         param_bs.pos = i
         bs.write_bit(param_bs.read_bit())
+    if relay:
+        bs.write_bits(0, 5)
 
     return bs.to_bytes(), total_bits
 
 
 def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
-                         mode=RPCMode.Server, user_rpc_constant=None):
+                         mode=RPCMode.Server, user_rpc_constant=None,
+                         relay=False):
     """Encode a first-use RPC (includes method name hash)."""
     class_guid, method_hash = get_method_id(method_name)
     method_id_bits = (len(class_guid) + len(method_hash)) * 8
@@ -312,9 +317,10 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     param_bits = param_bs.bit_length
 
     hash_extra_bits = method_id_bits - 48
+    relay_bits = 5 if relay else 0
     target_bits = 1 if mode == RPCMode.Player else 0
     param_start = 160 + hash_extra_bits + 52 + 4 + target_bits
-    total_bits = param_start + param_bits
+    total_bits = param_start + param_bits + relay_bits
 
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
@@ -332,7 +338,7 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
     # 52-bit internal metadata: method_tag(4) + zeros(16) + remaining_count(16) + constant(16)
-    remaining_count = param_bits + 19 + target_bits
+    remaining_count = param_bits + 19 + target_bits + relay_bits
     method_tag = METHOD_TAG_MAP.get(method_name, 0)
     bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
@@ -347,6 +353,8 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     for i in range(param_bs.bit_length):
         param_bs.pos = i
         bs.write_bit(param_bs.read_bit())
+    if relay:
+        bs.write_bits(0, 5)
 
     return bs.to_bytes(), total_bits
 

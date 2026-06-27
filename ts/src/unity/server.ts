@@ -140,23 +140,23 @@ export class UnityServer {
     target: ClientSession,
     methodName: string,
     params: RpcParam[],
-    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number },
+    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
   ): void {
     const viewId = options?.viewId ?? 1;
     const mode = options?.mode ?? RpcMode.Server;
-    this.sendRpcTo(target, methodName, params, viewId, mode, options?.userRpcConstant);
+    this.sendRpcTo(target, methodName, params, viewId, mode, options?.userRpcConstant, options?.relay);
   }
 
   broadcastRpc(
     methodName: string,
     params: RpcParam[],
-    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; userRpcConstant?: number },
+    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
   ): void {
     const viewId = options?.viewId ?? 1;
     const mode = options?.mode ?? RpcMode.All;
     for (const session of this.raknet.clients.values()) {
       if (options?.exclude && session.id === options.exclude.id) continue;
-      this.sendRpcTo(session, methodName, params, viewId, mode, options?.userRpcConstant);
+      this.sendRpcTo(session, methodName, params, viewId, mode, options?.userRpcConstant, options?.relay);
     }
   }
 
@@ -212,6 +212,7 @@ export class UnityServer {
     viewId: number,
     mode: RpcMode,
     userRpcConstant?: number,
+    relay?: boolean,
   ): void {
     let sent = this.rpcSentMethods.get(session.id);
     if (!sent) {
@@ -223,10 +224,11 @@ export class UnityServer {
     this.rpcCounters.set(session.id, counter + 1);
 
     let result: { data: Uint8Array; bitLength: number };
+    const opts = { methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }), ...(relay && { relay }) };
     if (sent.has(methodName) && hasMethodIndex(methodName)) {
-      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
+      result = encodeRpcSubsequent(opts);
     } else {
-      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
+      result = encodeRpcFirstUse(opts);
       if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 

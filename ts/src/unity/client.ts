@@ -126,18 +126,20 @@ export class UnityClient {
   sendRpc(
     methodName: string,
     params: RpcParam[],
-    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number },
+    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
   ): void {
     const viewId = options?.viewId ?? 1;
     const mode = options?.mode ?? RpcMode.Server;
     const userRpcConstant = options?.userRpcConstant;
+    const relay = options?.relay;
     const counter = this.rpcCounter++;
 
+    const opts = { methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }), ...(relay && { relay }) };
     let result: { data: Uint8Array; bitLength: number };
     if (this.rpcSentMethods.has(methodName) && hasMethodIndex(methodName)) {
-      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
+      result = encodeRpcSubsequent(opts);
     } else {
-      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
+      result = encodeRpcFirstUse(opts);
       if (hasMethodIndex(methodName)) this.rpcSentMethods.add(methodName);
     }
 
