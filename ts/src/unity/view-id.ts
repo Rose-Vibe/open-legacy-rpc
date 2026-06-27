@@ -27,12 +27,21 @@ export function encodeViewIdFromVid(vid: ViewId): Uint8Array {
 }
 
 export function decodeViewIdBits(bs: BitStream): number {
-  return bs.readBits(48);
+  const hi = bs.readBits(16);
+  const mid = bs.readBits(16);
+  const lo = bs.readBits(16);
+  return hi * 0x100000000 + mid * 0x10000 + lo;
 }
 
 export function encodeViewId16(scope: 'scene' | 'allocated', id: number): number {
   if (scope === 'scene') {
+    if (id < 0 || id > 4095) {
+      throw new Error(`scene ViewID out of range: ${id} (must be 0-4095)`);
+    }
     return id << 2;
+  }
+  if (id < 0 || id > 255) {
+    throw new Error(`allocated ViewID out of range: ${id} (must be 0-255)`);
   }
   return 0x4000 | (id << 6);
 }

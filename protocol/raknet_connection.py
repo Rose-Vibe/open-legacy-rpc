@@ -207,6 +207,9 @@ class RakNetClient:
             self.state = ConnectionState.CONNECTED
 
     def _handle_player_assignment(self, payload):
+        if len(payload) < 13:
+            log.warning("Player assignment too short for player_index: %d bytes",
+                        len(payload))
         if len(payload) >= 13:
             self.player_index = struct.unpack('>I', payload[9:13])[0]
         if len(payload) >= 17:
@@ -383,7 +386,7 @@ class RakNetServer:
         if self._password:
             # Password follows the OFFLINE_MAGIC(16) + guid(8) in the 0x04 request
             pw_offset = 1 + 16 + 8  # msg_id + magic + guid
-            client_pw = payload[pw_offset:].decode('ascii', errors='replace')
+            client_pw = payload[pw_offset:].decode('ascii', errors='ignore')
             if client_pw != self._password:
                 log.info("Rejected connection from %s: wrong password", addr)
                 self.peers.pop(addr, None)

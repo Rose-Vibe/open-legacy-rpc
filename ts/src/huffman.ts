@@ -240,7 +240,10 @@ export function decodeString(bits: string): Uint8Array {
   let node: HuffmanNode | null = tree;
   for (let i = 0; i < bits.length; i++) {
     node = bits[i] === '0' ? node.left : node.right;
-    if (!node) break;
+    if (!node) {
+      console.warn('Huffman decode hit null node — truncating string');
+      break;
+    }
     if (node.char !== null) {
       result.push(node.char);
       node = tree;

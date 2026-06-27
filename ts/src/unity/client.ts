@@ -160,30 +160,34 @@ export class UnityClient {
   }
 
   private handleRpc(msg: IncomingMessage): void {
+    let decoded;
     try {
-      const decoded = decodeRpc(msg.payload, msg.bitLength);
-      const handler = this.rpcHandlers.get(decoded.methodName);
-      if (handler) {
-        handler(...decoded.params);
-      }
-    } catch {
-      // Silently drop malformed RPCs
+      decoded = decodeRpc(msg.payload, msg.bitLength);
+    } catch (e) {
+      console.warn('Failed to decode RPC:', e);
+      return;
+    }
+    const handler = this.rpcHandlers.get(decoded.methodName);
+    if (handler) {
+      handler(...decoded.params);
     }
   }
 
   private handleStateSync(msg: IncomingMessage): void {
+    let decoded;
     try {
-      const decoded = decodeStateSync(msg.payload, msg.bitLength);
-      const syncMsg: StateSyncMessage = {
-        ...decoded,
-        payload: msg.payload,
-        bitLength: msg.bitLength,
-      };
-      const handler =
-        this.stateSyncHandlers.get(decoded.viewId) ?? this.stateSyncHandlers.get(null);
-      if (handler) handler(syncMsg);
-    } catch {
-      // Silently drop malformed state sync
+      decoded = decodeStateSync(msg.payload, msg.bitLength);
+    } catch (e) {
+      console.warn('Failed to decode state sync:', e);
+      return;
     }
+    const syncMsg: StateSyncMessage = {
+      ...decoded,
+      payload: msg.payload,
+      bitLength: msg.bitLength,
+    };
+    const handler =
+      this.stateSyncHandlers.get(decoded.viewId) ?? this.stateSyncHandlers.get(null);
+    if (handler) handler(syncMsg);
   }
 }

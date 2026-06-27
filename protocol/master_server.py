@@ -195,7 +195,7 @@ class MasterServer:
         try:
             msg = decode_update_row(payload)
         except Exception:
-            log.warning("Failed to decode UpdateRow from %s", addr)
+            log.warning("Failed to decode UpdateRow from %s", addr, exc_info=True)
             return
 
         if not self._check_version(addr, msg['version']):
@@ -264,7 +264,7 @@ class MasterServer:
         try:
             msg = decode_query_request(payload)
         except Exception:
-            log.warning("Failed to decode QueryRequest from %s", addr)
+            log.warning("Failed to decode QueryRequest from %s", addr, exc_info=True)
             return
 
         if not self._check_version(addr, msg['version']):
@@ -296,7 +296,7 @@ class MasterServer:
         try:
             msg = decode_remove_row(payload)
         except Exception:
-            log.warning("Failed to decode RemoveRow from %s", addr)
+            log.warning("Failed to decode RemoveRow from %s", addr, exc_info=True)
             return
 
         table = self._tables.get(msg['table'])

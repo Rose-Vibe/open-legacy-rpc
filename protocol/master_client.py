@@ -79,6 +79,9 @@ class MasterClient:
             msgs = self._client.poll(timeout=0.1)
             for msg_id, data, rel, bits in msgs:
                 if msg_id == ID_DATABASE_ROWID:
+                    if len(data) < 5:
+                        log.warning("RowID response too short: %d bytes", len(data))
+                        continue
                     self._row_id = int.from_bytes(data[1:5], 'big')
                     log.info("Registered with row_id=%d", self._row_id)
                     return self._row_id

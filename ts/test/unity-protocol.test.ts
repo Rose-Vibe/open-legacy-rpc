@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { computeMethodId, computeMethodIndex } from '../src/unity/method-hash.js';
-import { encodeViewId16, decodeViewId16, encodeViewId } from '../src/unity/view-id.js';
+import { encodeViewId16, decodeViewId16, encodeViewId, decodeViewIdBits } from '../src/unity/view-id.js';
+import { BitStream } from '../src/bitstream.js';
+import { decodeQueryReply, encodeQueryReply } from '../src/master/serialization.js';
 import {
   encodeRpcSubsequent,
   encodeRpcFirstUse,
@@ -686,6 +688,16 @@ describe('Encoding edge cases', () => {
     expect(decoded.id).toBe(255);
   });
 
+  it('encodeViewId16 throws on scene id > 4095', () => {
+    expect(() => encodeViewId16('scene', 4096)).toThrow('out of range');
+    expect(() => encodeViewId16('scene', -1)).toThrow('out of range');
+  });
+
+  it('encodeViewId16 throws on allocated id > 255', () => {
+    expect(() => encodeViewId16('allocated', 256)).toThrow('out of range');
+    expect(() => encodeViewId16('allocated', -1)).toThrow('out of range');
+  });
+
   it('handles unknown method hash gracefully', () => {
     // Encode a first-use RPC, then tamper with the method hash bytes
     const result = encodeRpcFirstUse({
@@ -707,21 +719,16 @@ describe('Encoding edge cases', () => {
 });
 
 describe('Malformed packet resilience', () => {
-  it('decodeRpc does not crash on truncated payload', () => {
-    // BitStream reads zeros for out-of-bounds, so decode produces
-    // garbage but doesn't throw. The server layer catches errors.
-    const result = decodeRpc(new Uint8Array([0x1b, 0x00]), 16);
-    expect(result).toBeDefined();
-    expect(result.methodName).toBeDefined();
+  it('decodeRpc throws BitStreamError on truncated payload', () => {
+    expect(() => decodeRpc(new Uint8Array([0x1b, 0x00]), 16)).toThrow();
   });
 
-  it('decodeRpc does not crash on empty payload', () => {
-    const result = decodeRpc(new Uint8Array(1), 8);
-    expect(result).toBeDefined();
+  it('decodeRpc throws BitStreamError on empty payload', () => {
+    expect(() => decodeRpc(new Uint8Array(1), 8)).toThrow();
   });
 
-  it('decodeStateSync does not crash on truncated payload', () => {
-    // 12 bytes needed for header, 3 is too short but should not crash
+  it('decodeStateSync handles 12-byte payload without crash', () => {
+    // 12 bytes = 96 bits, enough for the full header
     const result = decodeStateSync(new Uint8Array(12), 96);
     expect(result).toBeDefined();
     expect(result.viewId).toBeDefined();
@@ -731,5 +738,35 @@ describe('Malformed packet resilience', () => {
     expect(isRpc(new Uint8Array([]))).toBe(false);
     expect(isRpc(new Uint8Array([0x1b]))).toBe(false);
     expect(isRpc(new Uint8Array([0x1b, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+  });
+});
+
+describe('decodeViewIdBits 48-bit', () => {
+  it('correctly decodes a 48-bit view ID without overflow', () => {
+    const bs = new BitStream();
+    bs.writeU16BE(0x0001);
+    bs.writeU16BE(0x0000);
+    bs.writeU16BE(0x0000);
+    bs.pos = 0;
+    const val = decodeViewIdBits(bs);
+    expect(val).toBe(0x100000000);
+  });
+});
+
+describe('decodeQueryReply cellIdx bounds', () => {
+  it('throws on cellIdx >= columns.length', () => {
+    // Build a reply with 1 column but cellIdx=5
+    const bs = new BitStream();
+    bs.writeU8(78); // ID_DATABASE_QUERY_REPLY
+    bs.writeU32BE(1); // numColumns
+    // column: name + type
+    bs.writeCompressedU32(0); // empty string (0 bits)
+    bs.writeU8(0); // NUMERIC
+    bs.writeU32BE(1); // numRows
+    bs.writeU32BE(0); // row key
+    bs.writeU32BE(1); // numEntries
+    bs.writeU32BE(5); // cellIdx = 5 (out of range!)
+    const data = bs.toBytes();
+    expect(() => decodeQueryReply(data)).toThrow('out of range');
   });
 });

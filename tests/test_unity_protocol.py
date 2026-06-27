@@ -504,6 +504,39 @@ def test_instantiate_group_flags_matches_capture():
     assert 0x002c - 0x0004 == 5 * 8
 
 
+def test_invalid_rpc_mode_does_not_crash():
+    """Decoding an RPC with an invalid RPCMode value should not crash."""
+    data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=0,
+                                       mode=RPCMode.Server)
+    # Tamper with the mode nibble at the known bit position (136)
+    # For subsequent-use, mode is at bit 136. Set to value 4 (invalid).
+    bs = BitStream(data)
+    bs.pos = 136
+    bs.write_bits(4, 4)
+    tampered = bs.to_bytes()
+    result = decode_rpc(tampered, bits)
+    assert result['rpc_mode'] == 4  # raw int, not RPCMode enum
+
+
+def test_encode_params_zero_values_not_treated_as_missing():
+    """Encoding int=0, float=0.0, string='' should produce real values, not defaults."""
+    data_int, bits_int = encode_rpc_subsequent('RPC_Int', [0], view_id=1, rpc_counter=0)
+    decoded_int = decode_rpc(data_int, bits_int)
+    assert decoded_int['params'][0] == 0
+
+    data_float, bits_float = encode_rpc_subsequent('RPC_Float', [0.0], view_id=1, rpc_counter=0)
+    decoded_float = decode_rpc(data_float, bits_float)
+    assert decoded_float['params'][0] == 0.0
+
+    data_str, bits_str = encode_rpc_subsequent('RPC_String', [''], view_id=1, rpc_counter=0)
+    decoded_str = decode_rpc(data_str, bits_str)
+    assert decoded_str['params'][0] == ''
+
+    data_bytes, bits_bytes = encode_rpc_subsequent('RPC_Bytes', [b''], view_id=1, rpc_counter=0)
+    decoded_bytes = decode_rpc(data_bytes, bits_bytes)
+    assert decoded_bytes['params'][0] == b''
+
+
 def test_rpc_counter_overflow_wraps_at_128():
     """RPC counter wraps at 128 (single byte, *2)."""
     for counter in range(501):

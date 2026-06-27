@@ -368,7 +368,11 @@ def decode_rpc(payload, bit_length):
         result['method_name'] = INDEX_TO_METHOD.get(method_idx, f'unknown_0x{method_idx:02x}')
         bs.pos = 136
 
-    result['rpc_mode'] = RPCMode(bs.read_bits(4))
+    mode_val = bs.read_bits(4)
+    try:
+        result['rpc_mode'] = RPCMode(mode_val)
+    except ValueError:
+        result['rpc_mode'] = mode_val
 
     # mode=Player has a 1-bit target field before params
     if result['rpc_mode'] == RPCMode.Player:
@@ -387,25 +391,25 @@ def _encode_params(bs, sig, params):
     for i, ptype in enumerate(sig):
         val = params[i] if i < len(params) else None
         if ptype == 'int':
-            bs.write_i32_be(val or 0)
+            bs.write_i32_be(val if val is not None else 0)
         elif ptype == 'float':
-            bs.write_float_be(val or 0.0)
+            bs.write_float_be(val if val is not None else 0.0)
         elif ptype == 'string':
-            _encode_string_param(bs, val or '')
+            _encode_string_param(bs, val if val is not None else '')
         elif ptype == 'Vector3':
-            v = val or (0, 0, 0)
+            v = val if val is not None else (0, 0, 0)
             bs.write_vector3(*v)
         elif ptype == 'Quaternion':
-            q = val or (0, 0, 0, 1)
+            q = val if val is not None else (0, 0, 0, 1)
             bs.write_quaternion(*q)
         elif ptype == 'bytes':
-            data = val or b''
+            data = val if val is not None else b''
             bs.write_u32_be(len(data))
             bs.write_bytes(data)
         elif ptype == 'NetworkViewID':
-            bs.write_bits(val or 0, 16)
+            bs.write_bits(val if val is not None else 0, 16)
         elif ptype == 'NetworkPlayer':
-            bs.write_i32_be(val or 0)
+            bs.write_i32_be(val if val is not None else 0)
 
 
 def _decode_params(bs, sig):

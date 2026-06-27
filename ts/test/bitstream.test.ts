@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BitStream } from '../src/bitstream.js';
+import { BitStream, BitStreamError } from '../src/bitstream.js';
 
 describe('BitStream', () => {
   describe('empty stream', () => {
@@ -162,6 +162,32 @@ describe('BitStream', () => {
       expect(bs.remaining).toBe(8);
       bs.readU8();
       expect(bs.remaining).toBe(0);
+    });
+  });
+
+  describe('bounds checking', () => {
+    it('throws BitStreamError when reading past end', () => {
+      const bs = BitStream.fromBytes(new Uint8Array([0xff]), 4);
+      bs.readBits(4);
+      expect(() => bs.readBit()).toThrow(BitStreamError);
+    });
+
+    it('throws BitStreamError on empty stream read', () => {
+      const bs = BitStream.fromBytes(new Uint8Array(0), 0);
+      expect(() => bs.readBit()).toThrow(BitStreamError);
+    });
+
+    it('error message includes position and length', () => {
+      const bs = BitStream.fromBytes(new Uint8Array([0x00]), 8);
+      bs.readBits(8);
+      try {
+        bs.readBit();
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(BitStreamError);
+        expect((e as BitStreamError).message).toContain('pos=8');
+        expect((e as BitStreamError).message).toContain('length=8');
+      }
     });
   });
 });

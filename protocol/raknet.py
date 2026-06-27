@@ -207,7 +207,9 @@ def _parse_encapsulated_messages(data):
 
             end = pos + byte_length
             if end > len(data):
+                actual_len = len(data) - pos
                 msg.payload = data[pos:]
+                msg.bit_length = actual_len * 8
             else:
                 msg.payload = data[pos:end]
             pos = end

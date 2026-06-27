@@ -3,6 +3,13 @@ const FLOAT_VIEW = new DataView(FLOAT_BUF);
 const DOUBLE_BUF = new ArrayBuffer(8);
 const DOUBLE_VIEW = new DataView(DOUBLE_BUF);
 
+export class BitStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BitStreamError';
+  }
+}
+
 export class BitStream {
   private buf: Uint8Array;
   private _bitLength: number;
@@ -60,6 +67,11 @@ export class BitStream {
   // ── Read operations ──
 
   readBit(): number {
+    if (this._pos >= this._bitLength) {
+      throw new BitStreamError(
+        `read past end: pos=${this._pos}, length=${this._bitLength}`,
+      );
+    }
     const byteIdx = this._pos >>> 3;
     const bitIdx = 7 - (this._pos & 7);
     this._pos += 1;

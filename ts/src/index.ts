@@ -1,4 +1,5 @@
-export { BitStream } from './bitstream.js';
+export { BitStream, BitStreamError } from './bitstream.js';
+export { UdpSocket } from './raknet/socket.js';
 export {
   encodeString,
   encodeBytes,

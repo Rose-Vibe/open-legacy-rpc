@@ -131,7 +131,11 @@ function readCell(bs: BitStream, colType: number): number | string | Uint8Array 
     const length = bs.readU32BE();
     return bs.readAlignedBytes(length);
   }
-  if (colType === POINTER) return bs.readBits(64);
+  if (colType === POINTER) {
+    const hi = bs.readBits(32);
+    const lo = bs.readBits(32);
+    return hi * 0x100000000 + lo;
+  }
   return null;
 }
 
@@ -150,7 +154,11 @@ function writeCell(bs: BitStream, value: number | string | Uint8Array | null, co
     bs.writeU32BE(data.length);
     bs.writeAlignedBytes(data);
   } else if (colType === POINTER) {
-    bs.writeBits(value as number, 64);
+    const v = value as number;
+    const hi = Math.floor(v / 0x100000000) >>> 0;
+    const lo = v >>> 0;
+    bs.writeBits(hi, 32);
+    bs.writeBits(lo, 32);
   }
 }
 
@@ -344,6 +352,11 @@ export function decodeQueryReply(payload: Uint8Array): QueryReplyMessage {
     const cells: Record<string, number | string | Uint8Array | null> = {};
     for (let j = 0; j < numEntries; j++) {
       const cellIdx = bs.readU32BE();
+      if (cellIdx >= columns.length) {
+        throw new Error(
+          `cellIdx ${cellIdx} out of range (have ${columns.length} columns)`,
+        );
+      }
       const col = columns[cellIdx] as Column;
       cells[col.name] = readCell(bs, col.type);
     }

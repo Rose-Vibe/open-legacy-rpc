@@ -241,28 +241,32 @@ export class UnityServer {
   }
 
   private handleRpc(session: ClientSession, msg: IncomingMessage): void {
+    let decoded;
     try {
-      const decoded = decodeRpc(msg.payload, msg.bitLength);
-      const handler = this.rpcHandlers.get(decoded.methodName);
-      if (handler) {
-        handler(session, ...decoded.params);
-      }
-    } catch {
-      // Silently drop malformed RPCs
+      decoded = decodeRpc(msg.payload, msg.bitLength);
+    } catch (e) {
+      console.warn('Failed to decode RPC:', e);
+      return;
+    }
+    const handler = this.rpcHandlers.get(decoded.methodName);
+    if (handler) {
+      handler(session, ...decoded.params);
     }
   }
 
   private handleStateSync(session: ClientSession, msg: IncomingMessage): void {
+    let decoded;
     try {
-      const decoded = decodeStateSync(msg.payload, msg.bitLength);
-      const syncMsg: StateSyncMessage = {
-        ...decoded,
-        payload: msg.payload,
-        bitLength: msg.bitLength,
-      };
-      for (const h of this.stateSyncHandlers) h(session, syncMsg);
-    } catch {
-      // Silently drop malformed state sync
+      decoded = decodeStateSync(msg.payload, msg.bitLength);
+    } catch (e) {
+      console.warn('Failed to decode state sync:', e);
+      return;
     }
+    const syncMsg: StateSyncMessage = {
+      ...decoded,
+      payload: msg.payload,
+      bitLength: msg.bitLength,
+    };
+    for (const h of this.stateSyncHandlers) h(session, syncMsg);
   }
 }

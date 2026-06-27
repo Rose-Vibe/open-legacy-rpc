@@ -2,10 +2,13 @@
 RakNet 3.731 transport layer — construct and parse datagrams,
 manage reliability, ACKs, and split packet reassembly.
 """
+import logging
 import struct
 import time
 import socket
 from enum import IntEnum
+
+log = logging.getLogger(__name__)
 
 
 OFFLINE_MAGIC = bytes([
@@ -145,7 +148,11 @@ def unpack_encapsulated(data):
             pos += 4
 
         end = pos + byte_length
-        msg.payload = bytes(data[pos:min(end, len(data))])
+        if end > len(data):
+            msg.payload = bytes(data[pos:])
+            msg.bit_length = (len(data) - pos) * 8
+        else:
+            msg.payload = bytes(data[pos:end])
         pos = end
         messages.append(msg)
 
@@ -309,8 +316,8 @@ class RakNetPeer:
     def send_raw(self, data):
         try:
             self.sock.sendto(data, self.remote_addr)
-        except (OSError, AttributeError):
-            pass
+        except OSError as e:
+            log.debug("send_raw failed to %s: %s", self.remote_addr, e)
 
     def send_message(self, payload, reliability=Reliability.RELIABLE_ORDERED,
                      ordering_channel=0):

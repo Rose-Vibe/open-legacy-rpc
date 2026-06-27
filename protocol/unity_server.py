@@ -263,6 +263,7 @@ class UnityServer:
         if not self._is_recv_enabled(addr, view_id):
             return
         method = result.get('method_name', '')
-        if method in self._rpc_handlers:
+        handler = self._rpc_handlers.get(method)
+        if handler:
             params = result.get('params', [])
-            self._rpc_handlers[method](addr, *params)
+            handler(addr, *params)

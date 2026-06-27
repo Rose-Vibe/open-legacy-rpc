@@ -8,6 +8,9 @@ Tree construction matches RakNet's sorted-list algorithm:
 - Combined nodes inserted before the first existing node with weight >=
   the combined weight (stable insertion)
 """
+import logging
+
+log = logging.getLogger(__name__)
 
 ENGLISH_CHAR_FREQUENCIES = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 722, 0, 0, 2, 0, 0,
@@ -87,6 +90,7 @@ def decode_string(bits, tree):
         else:
             node = node.right
         if node is None:
+            log.warning("Huffman decode hit null node — truncating string")
             break
         if node.char is not None:
             result.append(node.char)
