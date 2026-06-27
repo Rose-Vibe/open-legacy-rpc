@@ -41,14 +41,14 @@ A Node.js module that mirrors `conformance/unity_runner.py`:
 |--------|---------------|
 | `startUnityServer` | Spawn Unity binary with `--server --experiment <name> --port <port>`, wait for "Server ready" log |
 | `startUnityClient` | Spawn Unity binary with `--client --experiment <name> --port <port> --address 127.0.0.1` |
-| `connectToUnity` | Create TS `UnityClient`, connect to Unity server on localhost:port |
+| `connectToUnity` | Create `UdpSocket` + TS `UnityClient`, connect to Unity server on localhost:port |
 | `assertConnected` | Check `client.connected === true` |
 | `waitForUnityLog` | Poll Unity's log file for regex pattern match |
 | `sendRpc` | Encode and send RPC via TS client |
 | `expectRpc` | Register handler, poll TS client, wait for matching RPC |
 | `expectServerRpc` | Wait for RPC on TS server from Unity client |
 | `waitForUnityConnect` | Wait for Unity client to connect to TS server |
-| `startPythonServer` | Create TS `UnityServer`, bind and listen |
+| `startPythonServer` | Create `UdpSocket` + TS `UnityServer`, pre-register RPC handlers, bind and listen (despite the name, creates a TS server in this context) |
 | `disconnect` | Graceful disconnect |
 | `sleep` | setTimeout-based wait |
 
@@ -67,7 +67,8 @@ Unity writes logs to a specified path (`-logFile`). The TS runner:
 1. Creates a temp directory for each test
 2. Passes `-logFile <tempdir>/output_log.txt` to Unity
 3. Periodically reads the file (every 200ms) looking for pattern matches
-4. Cleans up temp dirs after test completion
+4. Checks if Unity process has exited (fast-fail on crash)
+5. Cleans up temp dirs after test completion
 
 ### Network Namespace
 
