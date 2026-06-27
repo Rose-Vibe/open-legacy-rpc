@@ -104,6 +104,10 @@ to check a subagent's progress, read the last 5 lines of its transcript
 file silently. Only message a subagent if you have new information to
 give it or need to change its task.
 
+If a subagent goes idle without sending results, check the end of its
+transcript file manually (in the `subagents/` directory under the session)
+rather than waiting or messaging it.
+
 ### When to Use Workflows
 
 For steps that involve fan-out (reviewing multiple files/dimensions in parallel,

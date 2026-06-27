@@ -25,6 +25,7 @@ interface TestResult {
 
 const CATEGORIES = ['handshake', 'rpc', 'stateSync', 'multiClient', 'edgeCases'];
 const PROJECT_ROOT = new URL('../../', import.meta.url).pathname.replace(/\/$/, '');
+const TSX = new URL('../../ts/node_modules/.bin/tsx', import.meta.url).pathname;
 
 async function generateScenarios(category: string): Promise<Scenario[]> {
   return new Promise((resolve, reject) => {
@@ -53,51 +54,15 @@ async function generateScenarios(category: string): Promise<Scenario[]> {
   });
 }
 
-async function runPythonPeer(scenario: Scenario, port: number): Promise<TestResult> {
-  const scenarioWithPort = { ...scenario, port };
-  return runSubprocess(
-    'python3',
-    ['-c', `
-import json, sys
-sys.path.insert(0, '.')
-from conformance.peer_runner import PeerTestRunner
-
-scenario = json.loads(sys.stdin.read())
-port = scenario.pop('port', 18800)
-runner = PeerTestRunner(scenario)
-runner.port = port
-result = runner.run()
-json.dump(result, sys.stdout)
-`],
-    JSON.stringify(scenarioWithPort),
-    PROJECT_ROOT,
-  );
-}
-
-async function runTsPeer(scenario: Scenario, port: number): Promise<TestResult> {
-  const scenarioWithPort = { ...scenario, port };
-  const output = await runSubprocessRaw(
-    'npx',
-    ['tsx', 'ts/scripts/peer-runner.ts'],
-    JSON.stringify([scenarioWithPort]),
-    PROJECT_ROOT,
-  );
-  try {
-    const results = JSON.parse(output) as TestResult[];
-    return results[0] ?? { testInfo: scenario.testInfo, mode: '', validation: { pass: false, failures: ['No result'] } };
-  } catch {
-    return { testInfo: scenario.testInfo, mode: '', validation: { pass: false, failures: [`Parse error: ${output.slice(0, 200)}`] } };
-  }
-}
-
 function runSubprocessRaw(
   cmd: string,
   args: string[],
   stdin: string,
   cwd: string,
+  timeoutMs = 30000,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { cwd, timeout: 15000 });
+    const proc = spawn(cmd, args, { cwd, timeout: timeoutMs });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     proc.stdout.on('data', (chunk: Buffer) => {
@@ -115,22 +80,143 @@ function runSubprocessRaw(
   });
 }
 
-async function runSubprocess(
-  cmd: string,
-  args: string[],
-  stdin: string,
-  cwd: string,
-): Promise<TestResult> {
-  const output = await runSubprocessRaw(cmd, args, stdin, cwd);
+function parseTsResult(output: string, scenario: Scenario): TestResult {
   try {
-    return JSON.parse(output) as TestResult;
+    const results = JSON.parse(output) as TestResult[];
+    return results[0] ?? { testInfo: scenario.testInfo, mode: '', validation: { pass: false, failures: ['No result'] } };
+  } catch {
+    return { testInfo: scenario.testInfo, mode: '', validation: { pass: false, failures: [`Parse error: ${output.slice(0, 200)}`] } };
+  }
+}
+
+function parsePyResult(output: string, scenario: Scenario): TestResult {
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (Array.isArray(parsed)) {
+      return (parsed as TestResult[])[0] ?? { testInfo: scenario.testInfo, mode: '', validation: { pass: false, failures: ['No result'] } };
+    }
+    return parsed as TestResult;
   } catch {
     return {
-      testInfo: { testId: '', testName: 'unknown', testDescription: '', category: '', mode: '' },
+      testInfo: scenario.testInfo,
       mode: '',
       validation: { pass: false, failures: [`Parse error: ${output.slice(0, 200)}`] },
     };
   }
+}
+
+async function runTsBoth(scenario: Scenario, port: number): Promise<TestResult> {
+  const scenarioWithPort = { ...scenario, port };
+  const output = await runSubprocessRaw(
+    TSX, ['ts/scripts/peer-runner.ts'],
+    JSON.stringify([scenarioWithPort]), PROJECT_ROOT,
+  );
+  return parseTsResult(output, scenario);
+}
+
+async function runPyBoth(scenario: Scenario, port: number): Promise<TestResult> {
+  const scenarioWithPort = { ...scenario, port };
+  const output = await runSubprocessRaw(
+    'python3', ['-m', 'conformance.peer_test_cli', 'run'],
+    JSON.stringify(scenarioWithPort), PROJECT_ROOT,
+  );
+  return parsePyResult(output, scenario);
+}
+
+async function runCrossLanguage(
+  scenario: Scenario,
+  port: number,
+  mode: 'ts-server/py-client' | 'py-server/ts-client',
+): Promise<TestResult> {
+  const scenarioWithPort = { ...scenario, port };
+  const scenarioJson = JSON.stringify(scenarioWithPort);
+  const scenarioArrayJson = JSON.stringify([scenarioWithPort]);
+
+  let serverProc: ReturnType<typeof spawn>;
+  let clientProc: ReturnType<typeof spawn>;
+
+  if (mode === 'ts-server/py-client') {
+    serverProc = spawn(TSX, ['ts/scripts/peer-runner.ts', '--role', 'server'], {
+      cwd: PROJECT_ROOT, timeout: 30000,
+    });
+    clientProc = spawn('python3', ['-m', 'conformance.peer_test_cli', 'run', '--role', 'client'], {
+      cwd: PROJECT_ROOT, timeout: 30000,
+    });
+    serverProc.stdin.write(scenarioArrayJson);
+    serverProc.stdin.end();
+    clientProc.stdin.write(scenarioJson);
+    clientProc.stdin.end();
+  } else {
+    serverProc = spawn('python3', ['-m', 'conformance.peer_test_cli', 'run', '--role', 'server'], {
+      cwd: PROJECT_ROOT, timeout: 30000,
+    });
+    clientProc = spawn(TSX, ['ts/scripts/peer-runner.ts', '--role', 'client'], {
+      cwd: PROJECT_ROOT, timeout: 30000,
+    });
+    serverProc.stdin.write(scenarioJson);
+    serverProc.stdin.end();
+    clientProc.stdin.write(scenarioArrayJson);
+    clientProc.stdin.end();
+  }
+
+  const collectOutput = (proc: ReturnType<typeof spawn>): Promise<{ stdout: string; stderr: string; code: number | null }> =>
+    new Promise((resolve) => {
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        stdout.push(chunk);
+      });
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        stderr.push(chunk);
+      });
+      proc.on('close', (code) => {
+        resolve({
+          stdout: Buffer.concat(stdout).toString(),
+          stderr: Buffer.concat(stderr).toString(),
+          code,
+        });
+      });
+      proc.on('error', () => {
+        resolve({ stdout: '', stderr: 'Process error', code: -1 });
+      });
+    });
+
+  const [serverResult, clientResult] = await Promise.all([
+    collectOutput(serverProc),
+    collectOutput(clientProc),
+  ]);
+
+  const failures: string[] = [];
+
+  const isTs = mode === 'ts-server/py-client';
+  const serverOut = isTs
+    ? parseTsResult(serverResult.stdout, scenario)
+    : parsePyResult(serverResult.stdout, scenario);
+  const clientOut = isTs
+    ? parsePyResult(clientResult.stdout, scenario)
+    : parseTsResult(clientResult.stdout, scenario);
+
+  if (!serverOut.validation.pass) {
+    failures.push(...serverOut.validation.failures.map((f) => `server: ${f}`));
+  }
+  if (!clientOut.validation.pass) {
+    failures.push(...clientOut.validation.failures.map((f) => `client: ${f}`));
+  }
+
+  if (failures.length === 0 && (serverResult.code !== 0 || clientResult.code !== 0)) {
+    if (serverResult.code !== 0) {
+      failures.push(`Server (${mode.split('/')[0]}) exited ${String(serverResult.code)}: ${serverResult.stderr.slice(0, 200)}`);
+    }
+    if (clientResult.code !== 0) {
+      failures.push(`Client (${mode.split('/')[1]}) exited ${String(clientResult.code)}: ${clientResult.stderr.slice(0, 200)}`);
+    }
+  }
+
+  return {
+    testInfo: scenario.testInfo,
+    mode,
+    validation: { pass: failures.length === 0, failures },
+  };
 }
 
 let portCounter = 20800;
@@ -138,13 +224,44 @@ function nextPort(): number {
   return ++portCounter;
 }
 
+type Mode = 'ts-both' | 'py-both' | 'ts-server/py-client' | 'py-server/ts-client';
+
+function logResult(result: TestResult, totalPass: { v: number }, totalFail: { v: number }): void {
+  const status = result.validation.pass ? 'PASS' : 'FAIL';
+  process.stderr.write(`  ${status}: ${result.testInfo.testName} [${result.mode}]\n`);
+  if (result.validation.pass) {
+    totalPass.v++;
+  } else {
+    totalFail.v++;
+    for (const f of result.validation.failures) {
+      process.stderr.write(`    -> ${f}\n`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
-  const categories = process.argv.slice(2);
-  const cats = categories.length > 0 ? categories : CATEGORIES;
+  const args = process.argv.slice(2);
+  const modeFlags: Mode[] = [];
+  const catArgs: string[] = [];
+
+  for (const arg of args) {
+    if (arg === '--cross' || arg === '--cross-language') {
+      modeFlags.push('ts-server/py-client', 'py-server/ts-client');
+    } else if (arg === '--all') {
+      modeFlags.push('ts-both', 'py-both', 'ts-server/py-client', 'py-server/ts-client');
+    } else if (arg === '--parity') {
+      modeFlags.push('ts-both', 'py-both');
+    } else if (!arg.startsWith('-')) {
+      catArgs.push(arg);
+    }
+  }
+
+  const modes: Mode[] = modeFlags.length > 0 ? modeFlags : ['ts-both', 'py-both', 'ts-server/py-client', 'py-server/ts-client'];
+  const cats = catArgs.length > 0 ? catArgs : CATEGORIES;
 
   const allResults: TestResult[] = [];
-  let totalPass = 0;
-  let totalFail = 0;
+  const totalPass = { v: 0 };
+  const totalFail = { v: 0 };
 
   for (const cat of cats) {
     process.stderr.write(`\n=== ${cat} ===\n`);
@@ -157,45 +274,29 @@ async function main(): Promise<void> {
     }
 
     for (const scenario of scenarios) {
-      // TS-as-both-sides
-      const port = nextPort();
-      const result = await runTsPeer(scenario, port);
-      result.mode = 'ts-both';
-      allResults.push(result);
+      for (const mode of modes) {
+        const port = nextPort();
+        let result: TestResult;
 
-      const status = result.validation.pass ? 'PASS' : 'FAIL';
-      process.stderr.write(`  ${status}: ${scenario.testInfo.testName} [ts-both]\n`);
-      if (result.validation.pass) {
-        totalPass++;
-      } else {
-        totalFail++;
-        for (const f of result.validation.failures) {
-          process.stderr.write(`    -> ${f}\n`);
+        if (mode === 'ts-both') {
+          result = await runTsBoth(scenario, port);
+          result.mode = 'ts-both';
+        } else if (mode === 'py-both') {
+          result = await runPyBoth(scenario, port);
+          result.mode = 'py-both';
+        } else {
+          result = await runCrossLanguage(scenario, port, mode);
         }
-      }
 
-      // Python-as-both-sides (baseline)
-      const port2 = nextPort();
-      const pyResult = await runPythonPeer(scenario, port2);
-      pyResult.mode = 'py-both';
-      allResults.push(pyResult);
-
-      const pyStatus = pyResult.validation.pass ? 'PASS' : 'FAIL';
-      process.stderr.write(`  ${pyStatus}: ${scenario.testInfo.testName} [py-both]\n`);
-      if (pyResult.validation.pass) {
-        totalPass++;
-      } else {
-        totalFail++;
-        for (const f of pyResult.validation.failures) {
-          process.stderr.write(`    -> ${f}\n`);
-        }
+        allResults.push(result);
+        logResult(result, totalPass, totalFail);
       }
     }
   }
 
-  process.stderr.write(`\n=== Summary: ${String(totalPass)} pass, ${String(totalFail)} fail ===\n`);
+  process.stderr.write(`\n=== Summary: ${String(totalPass.v)} pass, ${String(totalFail.v)} fail ===\n`);
   console.log(JSON.stringify(allResults, null, 2));
-  process.exit(totalFail > 0 ? 1 : 0);
+  process.exit(totalFail.v > 0 ? 1 : 0);
 }
 
 main().catch((e: unknown) => {

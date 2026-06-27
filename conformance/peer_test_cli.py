@@ -55,10 +55,11 @@ def cmd_run(args):
     if isinstance(scenarios, dict):
         scenarios = [scenarios]
 
+    role = getattr(args, 'role', None)
     any_fail = False
     results = []
     for scenario in scenarios:
-        result = run_scenario(scenario)
+        result = run_scenario(scenario, role=role)
         results.append(result)
         if not result['validation']['pass']:
             any_fail = True
@@ -119,6 +120,8 @@ def main():
     gen_parser.add_argument('mode', choices=['basic', 'random'])
 
     run_parser = subparsers.add_parser('run', help='Run a peer test scenario')
+    run_parser.add_argument('--role', choices=['server', 'client'],
+                           help='Only execute steps for this role')
 
     unity_parser = subparsers.add_parser('unity', help='Run a Unity test scenario')
     unity_parser.add_argument('scenario', help='Scenario name or "all"')

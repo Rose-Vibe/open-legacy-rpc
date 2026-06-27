@@ -36,17 +36,50 @@ def _next_port():
     return _port_counter
 
 
+SERVER_ACTIONS = {'startServer', 'assertServerConnections', 'expectServerDisconnect'}
+CLIENT_ACTIONS = {
+    'connect', 'disconnect', 'assertConnected', 'assertDisconnected',
+    'assertPlayerIndex', 'expectConnectTimeout',
+}
+BOTH_ACTIONS = {'sleep', 'poll'}
+
+SKIP_WAIT = {
+    'startServer': 3.0, 'connect': 1.0, 'disconnect': 0.3,
+    'sendRpc': 0.1, 'expectRpc': 0.1, 'sendStateSync': 0.1,
+    'expectStateSync': 0.1, 'assertConnected': 0, 'assertDisconnected': 0,
+    'assertPlayerIndex': 0, 'assertServerConnections': 0.2,
+    'expectServerDisconnect': 0.5,
+}
+
+
+def _step_role(step):
+    """Determine whether a step belongs to 'server', 'client', or 'both'."""
+    action = step['action']
+    if action in BOTH_ACTIONS:
+        return 'both'
+    if action in SERVER_ACTIONS:
+        return 'server'
+    if action in CLIENT_ACTIONS:
+        return 'client'
+    if action in ('sendRpc', 'sendStateSync'):
+        return 'server' if step.get('from') == 'server' else 'client'
+    if action in ('expectRpc', 'expectStateSync'):
+        return 'server' if step.get('on') == 'server' else 'client'
+    return 'both'
+
+
 class PeerTestRunner:
     """Runs a step-driven peer test with Python-as-both-sides."""
 
-    def __init__(self, scenario, timeout=5.0):
+    def __init__(self, scenario, timeout=5.0, role=None):
         self.scenario = scenario
         self.timeout = timeout
+        self.role = role
         self.failures = []
         self.server = None
         self.clients = {}
         self.server_thread = None
-        self.port = _next_port()
+        self.port = scenario.get('port') or _next_port()
         self._server_connected = []
         self._server_disconnected = []
         self._server_rpcs = {}
@@ -92,11 +125,49 @@ class PeerTestRunner:
 
     def _execute_step(self, step):
         action = step['action']
+        if self.role is not None:
+            sr = _step_role(step)
+            if sr != 'both' and sr != self.role:
+                self._skip_step(step)
+                return
         handler = getattr(self, f'_action_{action}', None)
         if handler is None:
             self.failures.append(f"Unknown action: {action}")
             return
         handler(step)
+
+    def _skip_step(self, step):
+        """Wait appropriately when skipping a step that belongs to the other role."""
+        action = step['action']
+
+        if self.role == 'server':
+            if action == 'connect':
+                client_name = step.get('client', 'default')
+                expected = len(self._server_connected) + 1
+                deadline = time.monotonic() + self.timeout
+                while len(self._server_connected) < expected and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if len(self._server_connected) >= expected:
+                    last = self._server_connected[-1]
+                    self._client_addrs[client_name] = last['addr']
+                return
+            if action == 'disconnect':
+                expected = len(self._server_disconnected) + 1
+                deadline = time.monotonic() + self.timeout
+                while len(self._server_disconnected) < expected and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                return
+            if action == 'expectConnectTimeout':
+                time.sleep(step.get('timeout', 3.0))
+                return
+
+        if self.role == 'client' and action == 'startServer':
+            time.sleep(3.0)
+            return
+
+        wait = SKIP_WAIT.get(action, 0.1)
+        if wait > 0:
+            time.sleep(wait)
 
     def _get_or_create_client(self, name='default'):
         if name not in self.clients:
@@ -122,10 +193,40 @@ class PeerTestRunner:
         self.server_thread.start()
         time.sleep(0.05)
 
+    def _pre_register_client_handlers(self, client_name, client):
+        """Eagerly register RPC and state sync handlers so messages aren't dropped."""
+        for s in self.scenario.get('steps', []):
+            if s['action'] == 'expectRpc':
+                on = s.get('on', 'server')
+                step_client = s.get('client', on)
+                target_name = 'default' if step_client == 'client' else step_client
+                if target_name != client_name or on == 'server':
+                    continue
+                method = s['methodName']
+                client_key = (client_name, method)
+                if client_key not in self._client_rpcs:
+                    self._client_rpcs[client_key] = []
+                    ck = client_key
+                    m = method
+                    client.on_rpc(m, lambda *args, _ck=ck: self._client_rpcs[_ck].append(list(args)))
+
+            if s['action'] == 'expectStateSync':
+                on = s.get('on', 'client')
+                step_client = s.get('client', 'default') if on != 'server' else None
+                target_name = 'default' if step_client == 'client' else step_client
+                if target_name != client_name or on == 'server':
+                    continue
+                sync_key = (client_name, 'stateSync')
+                if sync_key not in self._client_syncs:
+                    self._client_syncs[sync_key] = []
+                    sk = sync_key
+                    client.on_state_sync(None, lambda result, _sk=sk: self._client_syncs[_sk].append(result))
+
     def _action_connect(self, step):
         client_name = step.get('client', 'default')
         password = step.get('password', '')
         client = self._get_or_create_client(client_name)
+        self._pre_register_client_handlers(client_name, client)
         try:
             client.connect('127.0.0.1', self.port, timeout=self.timeout, password=password)
         except TimeoutError:
@@ -317,14 +418,25 @@ class PeerTestRunner:
                 self.failures.append(f"No client '{client_name}' for expectStateSync")
                 return
 
-            def handler(result):
-                received.append(result)
-
-            client.on_state_sync(view_id, handler)
-            deadline = time.monotonic() + timeout
-            while not received and time.monotonic() < deadline:
-                client.poll(0.05)
-            client.on_state_sync(view_id, lambda r: None)
+            sync_key = (client_name, 'stateSync')
+            queue = self._client_syncs.get(sync_key)
+            if queue is not None:
+                deadline = time.monotonic() + timeout
+                while not queue and time.monotonic() < deadline:
+                    client.poll(0.05)
+                for item in queue:
+                    if item.get('view_id') == view_id:
+                        received.append(item)
+                        queue.remove(item)
+                        break
+            else:
+                def handler(result):
+                    received.append(result)
+                client.on_state_sync(view_id, handler)
+                deadline = time.monotonic() + timeout
+                while not received and time.monotonic() < deadline:
+                    client.poll(0.05)
+                client.on_state_sync(view_id, lambda r: None)
 
         if not received:
             self.failures.append(
@@ -578,11 +690,11 @@ class MasterServerTestRunner:
         time.sleep(step.get('duration', 0.1))
 
 
-def run_scenario(scenario, timeout=5.0):
+def run_scenario(scenario, timeout=5.0, role=None):
     """Run a single peer test scenario and return the result."""
     category = scenario.get('testInfo', {}).get('category', '')
     if category == 'masterServer':
         runner = MasterServerTestRunner(scenario, timeout=timeout)
     else:
-        runner = PeerTestRunner(scenario, timeout=timeout)
+        runner = PeerTestRunner(scenario, timeout=timeout, role=role)
     return runner.run()

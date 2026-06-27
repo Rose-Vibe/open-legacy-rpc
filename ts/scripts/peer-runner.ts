@@ -36,9 +36,39 @@ function nextPort(): number {
   return ++portCounter;
 }
 
+const SERVER_ACTIONS = new Set(['startServer', 'assertServerConnections', 'expectServerDisconnect']);
+const CLIENT_ACTIONS = new Set([
+  'connect', 'disconnect', 'assertConnected', 'assertDisconnected',
+  'assertPlayerIndex', 'expectConnectTimeout',
+]);
+const BOTH_ACTIONS = new Set(['sleep', 'poll']);
+
+const SKIP_WAIT: Record<string, number> = {
+  startServer: 3000, connect: 1000, disconnect: 300,
+  sendRpc: 100, expectRpc: 100, sendStateSync: 100,
+  expectStateSync: 100, assertConnected: 0, assertDisconnected: 0,
+  assertPlayerIndex: 0, assertServerConnections: 200,
+  expectServerDisconnect: 500,
+};
+
+function stepRole(step: Step): 'server' | 'client' | 'both' {
+  const action = step.action;
+  if (BOTH_ACTIONS.has(action)) return 'both';
+  if (SERVER_ACTIONS.has(action)) return 'server';
+  if (CLIENT_ACTIONS.has(action)) return 'client';
+  if (action === 'sendRpc' || action === 'sendStateSync') {
+    return step.from === 'server' ? 'server' : 'client';
+  }
+  if (action === 'expectRpc' || action === 'expectStateSync') {
+    return step.on === 'server' ? 'server' : 'client';
+  }
+  return 'both';
+}
+
 class PeerTestRunner {
   private scenario: Scenario;
   private timeout: number;
+  private role: 'server' | 'client' | null;
   private failures: string[] = [];
   private server: UnityServer | null = null;
   private serverSocket: UdpSocket | null = null;
@@ -53,9 +83,10 @@ class PeerTestRunner {
     new Map();
   private clientSessions: Map<string, ClientSession> = new Map();
 
-  constructor(scenario: Scenario & { port?: number }, timeout = 5.0) {
+  constructor(scenario: Scenario & { port?: number }, timeout = 5.0, role: 'server' | 'client' | null = null) {
     this.scenario = scenario;
     this.timeout = timeout;
+    this.role = role;
     this.port = scenario.port ?? nextPort();
   }
 
@@ -113,12 +144,61 @@ class PeerTestRunner {
 
   private async executeStep(step: Step): Promise<void> {
     const action = step.action;
+    if (this.role !== null) {
+      const sr = stepRole(step);
+      if (sr !== 'both' && sr !== this.role) {
+        await this.skipStep(step);
+        return;
+      }
+    }
     const handler = this.handlers[action];
     if (!handler) {
       this.failures.push(`Unknown action: ${action}`);
       return;
     }
     await handler.call(this, step);
+  }
+
+  private async skipStep(step: Step): Promise<void> {
+    const action = step.action;
+
+    if (this.role === 'server') {
+      if (action === 'connect') {
+        const clientName = (step.client as string) ?? 'default';
+        const expected = this.serverConnected.length + 1;
+        const deadline = Date.now() + this.timeout * 1000;
+        while (this.serverConnected.length < expected && Date.now() < deadline) {
+          await sleep(50);
+        }
+        if (this.serverConnected.length >= expected) {
+          const last = this.serverConnected[this.serverConnected.length - 1];
+          if (last) {
+            this.clientSessions.set(clientName, last.session);
+          }
+        }
+        return;
+      }
+      if (action === 'disconnect') {
+        const expected = this.serverDisconnected.length + 1;
+        const deadline = Date.now() + this.timeout * 1000;
+        while (this.serverDisconnected.length < expected && Date.now() < deadline) {
+          await sleep(50);
+        }
+        return;
+      }
+      if (action === 'expectConnectTimeout') {
+        await sleep(((step.timeout as number) ?? 3.0) * 1000);
+        return;
+      }
+    }
+
+    if (this.role === 'client' && action === 'startServer') {
+      await sleep(3000);
+      return;
+    }
+
+    const wait = SKIP_WAIT[action] ?? 100;
+    if (wait > 0) await sleep(wait);
   }
 
   private preRegisterClientHandlers(clientName: string, client: UnityClient): void {
@@ -190,6 +270,7 @@ class PeerTestRunner {
       this.clientSockets.set(clientName, sock);
       const client = new UnityClient(sock);
       this.clients.set(clientName, client);
+      this.preRegisterClientHandlers(clientName, client);
 
       try {
         const connectOpts: { password?: string; timeout?: number } = {
@@ -209,8 +290,6 @@ class PeerTestRunner {
           this.clientSessions.set(clientName, last.session);
         }
       }
-
-      this.preRegisterClientHandlers(clientName, client);
     },
 
     assertConnected: (step: Step): void => {
@@ -513,6 +592,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  let role: 'server' | 'client' | null = null;
+  const args = process.argv.slice(2);
+  const roleIdx = args.indexOf('--role');
+  if (roleIdx !== -1 && args[roleIdx + 1]) {
+    const val = args[roleIdx + 1];
+    if (val === 'server' || val === 'client') {
+      role = val;
+    }
+  }
+
   const input = await readStdin();
   let scenarios: Scenario[];
   try {
@@ -525,7 +614,7 @@ async function main(): Promise<void> {
 
   const results: TestResult[] = [];
   for (const scenario of scenarios) {
-    const runner = new PeerTestRunner(scenario);
+    const runner = new PeerTestRunner(scenario, 5.0, role);
     const result = await runner.run();
     results.push(result);
   }
