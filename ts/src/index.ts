@@ -57,3 +57,20 @@ export { UnityServer } from './unity/server.js';
 export type { UnityServerOptions } from './unity/server.js';
 export { UnityClient } from './unity/client.js';
 export type { ConnectOptions } from './unity/client.js';
+export { ViewIdAllocator } from './services/view-id-allocator.js';
+export { ObjectStateTracker } from './services/object-state-tracker.js';
+export type { FieldDef } from './services/object-state-tracker.js';
+export {
+  int32,
+  float32,
+  string,
+  bytes,
+  vector3,
+  quaternion,
+  viewId as viewIdSerializer,
+  networkPlayer,
+  createMessageSerializer,
+} from './services/serialization.js';
+export type { Serializer, FieldSchema } from './services/serialization.js';
+export { ServerCluster } from './services/server-cluster.js';
+export type { ClusterClient } from './services/server-cluster.js';
