@@ -229,14 +229,10 @@ export class UnityServer {
       if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 
-    const sendHex = [...result.data].map(b => b.toString(16).padStart(2, '0')).join(' ');
-    console.log(`[UnityServer] SEND to ${session.id}: method="${methodName}" viewId=${String(viewId)} mode=${String(mode)} len=${String(result.data.length)} bits=${String(result.bitLength)} hex=[${sendHex}]`);
     this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED, result.bitLength);
   }
 
   private handleMessage(session: ClientSession, msg: IncomingMessage): void {
-    const hexDump = [...msg.payload].map(b => b.toString(16).padStart(2, '0')).join(' ');
-    console.log(`[UnityServer] msg from ${session.id}: len=${String(msg.payload.length)} rel=${String(msg.reliability)} bits=${String(msg.bitLength)} hex=[${hexDump}]`);
     if (msg.payload[0] !== 0x1b) return;
 
     if (msg.reliability === Reliability.UNRELIABLE_SEQUENCED) {
@@ -250,8 +246,7 @@ export class UnityServer {
     let decoded;
     try {
       decoded = decodeRpc(msg.payload, msg.bitLength);
-    } catch (e) {
-      console.warn('Failed to decode RPC:', e);
+    } catch {
       return;
     }
     (session as ClientSession & { lastRpcViewId?: number }).lastRpcViewId = decoded.viewId;
@@ -265,8 +260,7 @@ export class UnityServer {
     let decoded;
     try {
       decoded = decodeStateSync(msg.payload, msg.bitLength);
-    } catch (e) {
-      console.warn('Failed to decode state sync:', e);
+    } catch {
       return;
     }
     const syncMsg: StateSyncMessage = {
