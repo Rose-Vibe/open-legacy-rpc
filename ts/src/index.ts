@@ -37,6 +37,8 @@ export {
   METHOD_SIGNATURES,
   RPC_MODE_FROM_NAME,
   RPC_MODE_NAMES,
+  registerMethodTag,
+  registerMethodTags,
 } from './unity/rpc.js';
 export { RpcMode } from './unity/rpc.js';
 export type { RpcEncodeOptions, DecodedRpc, RpcParam, ParamType } from './unity/rpc.js';

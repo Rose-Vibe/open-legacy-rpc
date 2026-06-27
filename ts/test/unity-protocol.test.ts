@@ -432,7 +432,7 @@ describe('Delta State Sync', () => {
 });
 
 describe('RPC counter overflow', () => {
-  it('counter wraps at 128 (single byte, *2)', () => {
+  it('counter wraps at 32768 (16-bit field, *2)', () => {
     const encode = (counter: number) =>
       encodeRpcSubsequent({
         methodName: 'RPC_Int',
@@ -445,17 +445,17 @@ describe('RPC counter overflow', () => {
     const r0 = encode(0);
     const r127 = encode(127);
     const r128 = encode(128);
+    const r32767 = encode(32767);
+    const r32768 = encode(32768);
 
-    const d0 = decodeRpc(r0.data, r0.bitLength);
-    const d127 = decodeRpc(r127.data, r127.bitLength);
-    const d128 = decodeRpc(r128.data, r128.bitLength);
-
-    expect(d0.rpcCounter).toBe(0);
-    expect(d127.rpcCounter).toBe(127);
-    expect(d128.rpcCounter).toBe(0); // wraps intentionally
+    expect(decodeRpc(r0.data, r0.bitLength).rpcCounter).toBe(0);
+    expect(decodeRpc(r127.data, r127.bitLength).rpcCounter).toBe(127);
+    expect(decodeRpc(r128.data, r128.bitLength).rpcCounter).toBe(128);
+    expect(decodeRpc(r32767.data, r32767.bitLength).rpcCounter).toBe(32767);
+    expect(decodeRpc(r32768.data, r32768.bitLength).rpcCounter).toBe(0); // wraps
   });
 
-  it('counter values 0-500 all encode/decode correctly (multiple wraps)', () => {
+  it('counter values 0-500 all encode/decode correctly', () => {
     for (let i = 0; i <= 500; i++) {
       const result = encodeRpcSubsequent({
         methodName: 'RPC_Void',
@@ -465,7 +465,7 @@ describe('RPC counter overflow', () => {
         mode: RpcMode.Server,
       });
       const decoded = decodeRpc(result.data, result.bitLength);
-      expect(decoded.rpcCounter).toBe(i % 128);
+      expect(decoded.rpcCounter).toBe(i % 32768);
       expect(decoded.methodName).toBe('RPC_Void');
     }
   });
@@ -479,7 +479,7 @@ describe('RPC counter overflow', () => {
       mode: RpcMode.All,
     });
     const decoded = decodeRpc(r200.data, r200.bitLength);
-    expect(decoded.rpcCounter).toBe(200 % 128);
+    expect(decoded.rpcCounter).toBe(200);
     expect(decoded.params[0]).toBe('test');
   });
 });

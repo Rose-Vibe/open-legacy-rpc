@@ -43,8 +43,8 @@ export class ReliabilityLayer {
     return (Date.now() - this.connectTime) & 0xffffffff;
   }
 
-  queueOutgoing(payload: Uint8Array, reliability: Reliability, orderingChannel = 0): void {
-    const frame = createFrame(payload, reliability);
+  queueOutgoing(payload: Uint8Array, reliability: Reliability, orderingChannel = 0, bitLength?: number): void {
+    const frame = createFrame(payload, reliability, bitLength);
 
     if (isReliable(reliability)) {
       frame.reliableMsgNumber = this.reliableSendNum++;

@@ -231,7 +231,7 @@ export class UnityServer {
 
     const sendHex = [...result.data].map(b => b.toString(16).padStart(2, '0')).join(' ');
     console.log(`[UnityServer] SEND to ${session.id}: method="${methodName}" viewId=${String(viewId)} mode=${String(mode)} len=${String(result.data.length)} bits=${String(result.bitLength)} hex=[${sendHex}]`);
-    this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED);
+    this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED, result.bitLength);
   }
 
   private handleMessage(session: ClientSession, msg: IncomingMessage): void {
@@ -254,12 +254,10 @@ export class UnityServer {
       console.warn('Failed to decode RPC:', e);
       return;
     }
-    console.log(`[UnityServer] RPC decoded: method="${decoded.methodName}" firstUse=${String(decoded.firstUse)} classGuid=${decoded.classGuid ?? 'n/a'} methodHash=${decoded.methodHash ?? 'n/a'} params=${String(decoded.params.length)}`);
+    (session as ClientSession & { lastRpcViewId?: number }).lastRpcViewId = decoded.viewId;
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
       handler(session, ...decoded.params);
-    } else {
-      console.log(`[UnityServer] No handler for RPC "${decoded.methodName}"`);
     }
   }
 

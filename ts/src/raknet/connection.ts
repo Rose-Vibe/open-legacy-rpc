@@ -115,8 +115,8 @@ export class RakNetServer {
     this.messageHandlers.push(handler);
   }
 
-  sendTo(session: ClientSession, payload: Uint8Array, reliability: Reliability): void {
-    session.reliability.queueOutgoing(payload, reliability);
+  sendTo(session: ClientSession, payload: Uint8Array, reliability: Reliability, bitLength?: number): void {
+    session.reliability.queueOutgoing(payload, reliability, 0, bitLength);
   }
 
   getSession(id: string): ClientSession | undefined {
@@ -184,7 +184,7 @@ export class RakNetServer {
       this.handlePlayerReady(session);
       return true;
     }
-    if (msgId === 0x15) {
+    if (msgId === 0x13 || msgId === 0x15) {
       this.handleDisconnect(session);
       return true;
     }

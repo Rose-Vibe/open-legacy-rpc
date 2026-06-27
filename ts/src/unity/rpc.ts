@@ -38,7 +38,7 @@ export const RPC_MODE_FROM_NAME: Record<string, RpcMode> = {
 const MSG_ID_RPC = 0x1b;
 const MAX_BYTES_PARAM_SIZE = 1_048_576;
 const INTERNAL_RPC_CONSTANT = 0x0000;
-const USER_RPC_CONSTANT = 0x0002;
+const USER_RPC_CONSTANT = 0x2000;
 
 const INTERNAL_RPCS = new Set(['__RPCNetworkInstantiate']);
 
@@ -75,6 +75,17 @@ export const METHOD_SIGNATURES: Record<string, ParamType[]> = {
 
 const METHOD_INDEX_MAP = new Map<string, number>();
 const INDEX_TO_METHOD = new Map<number, string>();
+const METHOD_TAG_MAP = new Map<string, number>();
+
+export function registerMethodTag(methodName: string, tag: number): void {
+  METHOD_TAG_MAP.set(methodName, tag);
+}
+
+export function registerMethodTags(tags: Record<string, number>): void {
+  for (const [name, tag] of Object.entries(tags)) {
+    METHOD_TAG_MAP.set(name, tag);
+  }
+}
 
 function registerLoaderAssembly(): void {
   const INTERFACE_METHODS = 7;
@@ -141,14 +152,14 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
   bs.writeBytes(encodeViewId(opts.viewId));
-  const counterByte = (opts.rpcCounter * 2) & 0xff;
-  bs.writeU8(counterByte);
-  bs.writeU8(0x00);
+  const counter16 = (opts.rpcCounter * 2) & 0xffff;
+  bs.writeU8((counter16 >> 8) & 0xff);
+  bs.writeU8(counter16 & 0xff);
   bs.writeU8(0x0b);
   bs.writeBit(0);
   bs.writeBits(methodIndex, 7);
   bs.writeU16BE(0);
-  const remaining = totalBits - 121;
+  const remaining = totalBits - 120;
   bs.writeU16BE(remaining);
   const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : USER_RPC_CONSTANT;
   bs.writeU16BE(constant);
@@ -183,9 +194,9 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
   bs.writeBytes(encodeViewId(opts.viewId));
-  const counterByte = (opts.rpcCounter * 2) & 0xff;
-  bs.writeU8(counterByte);
-  bs.writeU8(0x00);
+  const counter16 = (opts.rpcCounter * 2) & 0xffff;
+  bs.writeU8((counter16 >> 8) & 0xff);
+  bs.writeU8(counter16 & 0xff);
   bs.writeU8(0x0b);
   bs.writeBit(1);
   bs.writeBits(0, 7);
@@ -195,8 +206,9 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeU8(lengthIndicator);
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
-  const remainingCount = paramBits + 19 + targetBits;
-  bs.writeBits(0, 4);
+  const remainingCount = paramBits + 20 + targetBits;
+  const methodTag = METHOD_TAG_MAP.get(opts.methodName) ?? 0;
+  bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);
   bs.writeU16BE(remainingCount);
   const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : USER_RPC_CONSTANT;
@@ -230,9 +242,10 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const viewIdMid = bs.readBits(16);
   const viewIdLo = bs.readBits(16);
   const viewId = viewIdHi * 0x100000000 + viewIdMid * 0x10000 + viewIdLo;
-  const counterByte = bs.readU8();
-  const rpcCounter = Math.floor(counterByte / 2);
-  bs.readBits(16); // rest of invocation metadata
+  const counterHigh = bs.readU8();
+  const counterLow = bs.readU8();
+  const rpcCounter = ((counterHigh << 8) | counterLow) >> 1;
+  bs.readBits(8); // 0x0b marker
   const firstUse = bs.readBit() === 1;
 
   const result: DecodedRpc = {

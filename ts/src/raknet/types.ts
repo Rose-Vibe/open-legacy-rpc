@@ -15,6 +15,7 @@ export const enum MessageId {
   OPEN_CONNECTION_REPLY = 0x0a,
   CONNECTION_REQUEST_ACCEPTED = 0x0e,
   NEW_INCOMING_CONNECTION = 0x11,
+  DISCONNECTION_NOTIFICATION_LEGACY = 0x13,
   DISCONNECTION_NOTIFICATION = 0x15,
   CONNECTION_LOST = 0x16,
   UNITY_MESSAGE = 0x1b,
@@ -77,10 +78,10 @@ export function isOrdered(r: Reliability): boolean {
   );
 }
 
-export function createFrame(payload: Uint8Array, reliability: Reliability): Frame {
+export function createFrame(payload: Uint8Array, reliability: Reliability, bitLength?: number): Frame {
   return {
     reliability,
-    bitLength: payload.length * 8,
+    bitLength: bitLength ?? payload.length * 8,
     reliableMsgNumber: null,
     orderingIndex: null,
     orderingChannel: 0,
