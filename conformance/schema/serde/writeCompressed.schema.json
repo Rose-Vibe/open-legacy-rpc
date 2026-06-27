@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "serde/writeCompressed.schema.json",
+  "title": "WriteCompressed<uint32> Serde Test",
+  "description": "Tests RakNet's variable-length uint32 encoding.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "uint32 value to encode"
+        }
+      },
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "object",
+      "required": ["dataHex", "bitLength"],
+      "properties": {
+        "dataHex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]*$",
+          "description": "Hex-encoded compressed bytes"
+        },
+        "bitLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of significant bits in the output"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

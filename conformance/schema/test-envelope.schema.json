@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test-envelope.schema.json",
+  "title": "Conformance Test Envelope",
+  "description": "Top-level envelope for all conformance test objects. Each stage (generate, implement, validate) appends fields to the same object.",
+  "type": "object",
+  "required": ["testInfo", "input"],
+  "properties": {
+    "testInfo": {
+      "type": "object",
+      "required": ["testId", "testName", "testDescription", "category", "mode"],
+      "properties": {
+        "testId": {
+          "type": "string",
+          "description": "UUID for request/response correlation"
+        },
+        "testName": {
+          "type": "string",
+          "description": "Human-readable test name"
+        },
+        "testDescription": {
+          "type": "string",
+          "description": "What this test validates"
+        },
+        "category": {
+          "type": "string",
+          "description": "Test category (discriminant for input/output union)"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["basic", "random"],
+          "description": "Whether this is a preset or randomly generated test"
+        }
+      },
+      "additionalProperties": false
+    },
+    "input": {
+      "type": "object",
+      "description": "Category-specific input data. Shape determined by testInfo.category."
+    },
+    "output": {
+      "type": "object",
+      "description": "Category-specific output data from the implementer. Shape determined by testInfo.category. Binary data is hex-encoded as 'dataHex' fields."
+    },
+    "validation": {
+      "type": "object",
+      "required": ["pass", "failures"],
+      "properties": {
+        "pass": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "floatSpecial": {
+      "description": "JSON cannot represent NaN/Infinity. Use these strings instead.",
+      "enum": ["NaN", "Infinity", "-Infinity"]
+    },
+    "numericValue": {
+      "description": "A numeric value that may be a JSON number or a float special string.",
+      "oneOf": [
+        { "type": "number" },
+        { "$ref": "#/$defs/floatSpecial" }
+      ]
+    }
+  }
+}

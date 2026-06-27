@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "serde/readCompressed.schema.json",
+  "title": "ReadCompressed<uint32> Serde Test",
+  "description": "Tests decoding RakNet's variable-length uint32.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["dataHex", "bitLength"],
+      "properties": {
+        "dataHex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]*$",
+          "description": "Hex-encoded compressed bytes"
+        },
+        "bitLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of significant bits"
+        }
+      },
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Decoded uint32 value"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

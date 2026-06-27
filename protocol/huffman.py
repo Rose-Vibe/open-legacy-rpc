@@ -110,7 +110,7 @@ def get_codes():
 def encode_string(s):
     """Encode a string to a bit string using the default Huffman tree (raw, no padding)."""
     bits = ''
-    for ch in s.encode('ascii'):
+    for ch in s.encode('latin-1'):
         if ch not in _codes:
             raise ValueError("Character %d (0x%02x) not in Huffman table" % (ch, ch))
         bits += _codes[ch]
