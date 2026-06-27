@@ -224,9 +224,9 @@ export class UnityServer {
 
     let result: { data: Uint8Array; bitLength: number };
     if (sent.has(methodName) && hasMethodIndex(methodName)) {
-      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode, userRpcConstant });
+      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
     } else {
-      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode, userRpcConstant });
+      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }) });
       if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 

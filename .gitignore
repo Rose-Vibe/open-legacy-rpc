@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 *.pcap
+node_modules/
+UnityProject/Library/
+UnityProject/Builds/
+experiments/*.dll

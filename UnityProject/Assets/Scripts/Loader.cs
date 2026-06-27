@@ -33,12 +33,19 @@ public class Loader : MonoBehaviour
             LoadExperiment();
         }
 
+        var secondRpc = GameObject.Find("SecondRpc");
+        var inheritedRpc = GameObject.Find("InheritedRpc");
+
         context = new ExperimentContext
         {
             Role = role,
             Args = experimentArgs ?? new string[0],
             PrimaryNetworkView = GetComponent<NetworkView>(),
-            Host = this
+            Host = this,
+            SecondRpc = secondRpc != null ? secondRpc.GetComponent<SecondRpcBehaviour>() : null,
+            SecondRpcNetworkView = secondRpc != null ? secondRpc.GetComponent<NetworkView>() : null,
+            InheritedRpc = inheritedRpc != null ? inheritedRpc.GetComponent<InheritedRpcDerived>() : null,
+            InheritedRpcNetworkView = inheritedRpc != null ? inheritedRpc.GetComponent<NetworkView>() : null,
         };
 
         if (experiment != null)
