@@ -362,49 +362,73 @@ padding between them.
 | NetworkPlayer | int32 BE (player index) | 32 |
 | NetworkViewID | 16-bit packed (see §14) | 16 |
 
-### 3.6 User RPC Constant
+### 3.6 RPC View Constant
 
-The 16-bit `user_rpc_constant` field distinguishes user RPCs from internal
-RPCs and encodes the source NetworkView's identity:
+The 16-bit field previously called "constant" is a **packed NetworkViewID**
+that identifies which NetworkView the RPC is sent through. It uses a
+different encoding than the 16-bit ViewID-as-parameter format (§14).
 
-| Value | Meaning |
-|-------|---------|
-| `0x0000` | Internal RPC (e.g. `__RPCNetworkInstantiate`) |
-| `sceneViewIndex × 2` | User RPC from a scene-baked NetworkView |
-| (varies) | User RPC from a runtime-allocated NetworkView |
+#### 3.6.1 Encoding
 
-**Scene-baked views** use a formula based on the view's scene order:
+| View Type | Formula | Bit 13 |
+|-----------|---------|--------|
+| Internal RPC | `0x0000` | 0 |
+| Scene-baked | `sceneViewIndex << 1` | 0 |
+| Allocated | `0x2000 \| (allocatedID << 5)` | 1 |
+
+Bit layout:
+```
+Scene:     [0 0 0 sceneViewIndex(12..1) 0]
+Allocated: [0 0 1 allocatedID(10..5) 0 0 0 0 0]
+```
+
+Bit 13 is the scene/allocated discriminator: `0` = scene-baked,
+`1` = allocated. This parallels (but differs from) bit 14 in the
+16-bit ViewID-as-parameter encoding (§14).
+
+**Scene-baked views:** `sceneViewIndex` is the 1-based index of the
+NetworkView in the scene hierarchy. The first view produces `0x0002`,
+the second `0x0004`, the third `0x0006`.
+
+**Allocated views:** `allocatedID` is the numeric ID assigned by
+`Network.AllocateViewID()`. The first allocated ID for player 1 is 50
+(from block_start=1, stride=50), producing `0x2000 | (50 << 5) = 0x2640`.
+
+#### 3.6.2 Decoding
 
 ```
-user_rpc_constant = sceneViewIndex × 2
+if val == 0x0000:
+    type = 'internal'
+elif val & 0x2000:
+    type = 'allocated'
+    id = (val & 0x1FFF) >> 5
+else:
+    type = 'scene'
+    id = val >> 1
 ```
 
-Where `sceneViewIndex` is the 1-based index of the NetworkView in the
-scene hierarchy. The first scene-baked view produces `0x0002`, the second
-`0x0004`, the third `0x0006`, etc.
+#### 3.6.3 Verified Values
 
-**Allocated views** (created via `Network.Instantiate` or
-`Network.AllocateViewID`) produce a different value. Observed:
-`AllocatedID:50` → `0x2640`. The exact derivation for allocated views
-is unknown, but it is per-class (all RPCs from the same MonoBehaviour
-subclass share the same constant) and consistent across Unity versions.
+| View | Type | ID | Formula | Constant |
+|------|------|----|---------|----------|
+| Loader | Scene-baked | 1 | `1 << 1` | `0x0002` |
+| SecondRpcBehaviour | Scene-baked | 2 | `2 << 1` | `0x0004` |
+| InheritedRpcDerived | Scene-baked | 3 | `3 << 1` | `0x0006` |
+| SecondRpcBehaviour | Allocated | 50 | `0x2000 \| (50 << 5)` | `0x2640` |
+| SecondRpcBehaviour | Allocated | 51 | `0x2000 \| (51 << 5)` | `0x2660` |
+| SecondRpcBehaviour | Allocated | 52 | `0x2000 \| (52 << 5)` | `0x2680` |
+| SecondRpcBehaviour | Allocated | 54 | `0x2000 \| (54 << 5)` | `0x26c0` |
+| InheritedRpcDerived | Allocated | 51 | `0x2000 \| (51 << 5)` | `0x2660` |
+| `__RPCNetworkInstantiate` | Internal | — | `0` | `0x0000` |
 
-The constant is also per-class, not per-method: all `[RPC]` methods on
-the same MonoBehaviour produce the same constant value.
+The field is **per-view-ID, not per-class**: same class on different
+allocated IDs produces different constants; different classes on the same
+allocated ID produce the same constant.
 
 **Receivers do not validate this field strictly.** A server implementation
 can use a single default value (e.g. `0x2000`) and clients will accept
 the RPCs. The field is implemented as configurable (`userRpcConstant`
 parameter) for correctness when needed.
-
-Verified values:
-
-| NetworkView | Type | Constant |
-|-------------|------|----------|
-| SceneID 1 (Loader) | Scene-baked | `0x0002` |
-| SceneID 2 (SecondRpcBehaviour) | Scene-baked | `0x0004` |
-| SceneID 3 (InheritedRpcDerived) | Scene-baked | `0x0006` |
-| AllocatedID 50 | Allocated | `0x2640` |
 
 ### 3.7 Relay Format
 
