@@ -425,10 +425,16 @@ The field is **per-view-ID, not per-class**: same class on different
 allocated IDs produces different constants; different classes on the same
 allocated ID produce the same constant.
 
-**Receivers do not validate this field strictly.** A server implementation
-can use a single default value (e.g. `0x2000`) and clients will accept
-the RPCs. The field is implemented as configurable (`userRpcConstant`
-parameter) for correctness when needed.
+**This field is the RPC routing key.** Unity uses the constant — not the
+48-bit `view_id` header — to route incoming RPCs to the correct
+NetworkView. An RPC with a wrong constant is either delivered to the
+wrong NetworkView (if one exists at that ID) or dropped with an error.
+Correct constant = delivered; wrong constant = lost.
+
+A server implementation MUST set this field to the correct packed
+NetworkViewID for the target view. See the delivery test in the research
+doc `2026-06-27-rpc-constant-field-investigation.md` for experimental
+proof: 3/10 RPCs delivered (the 3 with correct constant), 7/10 dropped.
 
 ### 3.7 Relay Format
 

@@ -167,11 +167,17 @@ METHOD_SIGNATURES = {
 def _register_loader_assembly():
     """Register method indices for the test Loader assembly.
 
-    Assembly layout (MethodDef RIDs):
+    Assembly layout (MethodDef RIDs) — original build without InheritedRpc:
       1-4:   SerializeHandler (delegate)
       5-8:   ExperimentContext (class)
       9-15:  IExperiment (interface, 7 methods)
       16-42: Loader (MonoBehaviour)
+
+    NOTE: After adding InheritedRpcBase/InheritedRpcDerived to the Unity
+    project, the RIDs shifted (RPC_Int moved from 29 to 34). These indices
+    are kept at the original values for Python-to-Python test compatibility.
+    When sending RPCs to Unity, use first-use encoding (which includes the
+    method hash and doesn't depend on method_index).
     """
     _INTERFACE_METHODS = 7
     _LOADER_RPC_RIDS = {
@@ -200,13 +206,19 @@ def _register_loader_assembly():
 _register_loader_assembly()
 
 METHOD_TAG_MAP = {}
+for _name, _idx in METHOD_INDEX_MAP.items():
+    METHOD_TAG_MAP[_name] = _idx & 0x0F
+
+
+def compute_method_tag(method_index):
+    """Compute method_tag from method_index: bottom 4 bits."""
+    return method_index & 0x0F
 
 
 def register_method_tag(method_name, tag):
     """Register a method_tag value for first-use RPC encoding.
 
-    method_tag is the RPC method's ordinal position within Unity's
-    MonoBehaviour class hierarchy, multiplied by 4.
+    method_tag is the bottom 4 bits of the method_index.
     """
     METHOD_TAG_MAP[method_name] = tag
 

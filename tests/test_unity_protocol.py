@@ -139,8 +139,8 @@ def test_first_use_metadata_remaining_count():
     meta_start = 176
     meta_bits = all_bits[meta_start:meta_start+52]
 
-    # method_tag (bits 0-3): we write 0
-    assert meta_bits[0:4] == '0000'
+    # method_tag (bits 0-3): auto-computed as method_index & 0x0F (=4 for RPC_Int)
+    assert meta_bits[0:4] == '0100'
     # zeros (bits 4-19)
     assert meta_bits[4:20] == '0' * 16
     # remaining_bit_count (bits 20-35): param_bits(32) + 19 = 51

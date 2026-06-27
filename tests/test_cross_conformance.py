@@ -33,7 +33,7 @@ GOLDEN = {
                    'rpcCounter': 500, 'mode': RPCMode.Server},
     },
     'fu_int_42': {
-        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000033200000000002a',
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456400000033200000000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 0, 'mode': RPCMode.Server},
@@ -58,7 +58,7 @@ GOLDEN_TAG = {
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 0, 'mode': RPCMode.Server},
-        'tag': ('RPC_Int', 8),
+        'tag': ('RPC_Int', 8),  # override auto-computed tag (4) to 8
     },
 }
 
@@ -70,7 +70,7 @@ GOLDEN_MODES = {
                    'rpcCounter': 0, 'mode': RPCMode.Others},
     },
     'fu_int_42_others': {
-        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000033200010000002a',
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456400000033200010000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 0, 'mode': RPCMode.Others},
@@ -92,7 +92,7 @@ GOLDEN_CONSTANT = {
         'constant': 0x2640,
     },
     'fu_int_42_const2640': {
-        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000033264000000002a',
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456400000033264000000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 0, 'mode': RPCMode.Server},
@@ -108,7 +108,7 @@ GOLDEN_RELAY = {
                    'rpcCounter': 0, 'mode': RPCMode.Others},
     },
     'fu_int_42_relay': {
-        'hex': '1b00000000000100000b800000100c93b276d5b1d456000000038200010000002a00',
+        'hex': '1b00000000000100000b800000100c93b276d5b1d456400000038200010000002a00',
         'bits': 269,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 0, 'mode': RPCMode.Others},
@@ -161,13 +161,17 @@ def test_subsequent_player_mode_matches_ts():
 def test_first_use_with_method_tag_matches_ts():
     entry = GOLDEN_TAG['fu_int_42_tag8']
     name, tag = entry['tag']
+    original_tag = METHOD_TAG_MAP.get(name)
     register_method_tag(name, tag)
     try:
         data, bits = _encode(entry, first_use=True)
         assert data.hex() == entry['hex']
         assert bits == entry['bits']
     finally:
-        METHOD_TAG_MAP.pop(name, None)
+        if original_tag is not None:
+            METHOD_TAG_MAP[name] = original_tag
+        else:
+            METHOD_TAG_MAP.pop(name, None)
 
 
 def test_subsequent_others_mode_matches_ts():
