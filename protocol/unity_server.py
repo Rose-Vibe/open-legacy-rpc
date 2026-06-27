@@ -149,17 +149,19 @@ class UnityServer:
         return group not in disabled
 
     def send_rpc(self, method_name, params=None, target=None,
-                 mode=RPCMode.All, view_id=0):
+                 mode=RPCMode.All, view_id=0, user_rpc_constant=None):
         """Send an RPC to one or all clients. Respects group filtering."""
         params = params or []
 
         if target:
             if self._is_send_enabled(target, view_id):
-                self._send_rpc_to(target, method_name, params, view_id, mode)
+                self._send_rpc_to(target, method_name, params, view_id, mode,
+                                  user_rpc_constant)
         else:
             for addr in list(self._raknet.peers.keys()):
                 if self._is_send_enabled(addr, view_id):
-                    self._send_rpc_to(addr, method_name, params, view_id, mode)
+                    self._send_rpc_to(addr, method_name, params, view_id, mode,
+                                      user_rpc_constant)
 
     def send_state_sync(self, view_id, data_bs, target=None, is_first=False,
                         view_id_scope='scene'):
@@ -236,7 +238,8 @@ class UnityServer:
             for peer in list(self._raknet.peers.values()):
                 peer.check_retransmits()
 
-    def _send_rpc_to(self, addr, method_name, params, view_id, mode):
+    def _send_rpc_to(self, addr, method_name, params, view_id, mode,
+                     user_rpc_constant=None):
         if addr not in self._rpc_sent_methods:
             self._rpc_sent_methods[addr] = set()
         if addr not in self._rpc_counters:
@@ -248,11 +251,13 @@ class UnityServer:
         sent = self._rpc_sent_methods[addr]
         if method_name not in sent:
             payload, bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode)
+                method_name, params, view_id, counter, mode,
+                user_rpc_constant=user_rpc_constant)
             sent.add(method_name)
         else:
             payload, bits = encode_rpc_subsequent(
-                method_name, params, view_id, counter, mode)
+                method_name, params, view_id, counter, mode,
+                user_rpc_constant=user_rpc_constant)
 
         self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED)
 

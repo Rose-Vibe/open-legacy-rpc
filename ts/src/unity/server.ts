@@ -140,23 +140,23 @@ export class UnityServer {
     target: ClientSession,
     methodName: string,
     params: RpcParam[],
-    options?: { viewId?: number; mode?: RpcMode },
+    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number },
   ): void {
     const viewId = options?.viewId ?? 1;
     const mode = options?.mode ?? RpcMode.Server;
-    this.sendRpcTo(target, methodName, params, viewId, mode);
+    this.sendRpcTo(target, methodName, params, viewId, mode, options?.userRpcConstant);
   }
 
   broadcastRpc(
     methodName: string,
     params: RpcParam[],
-    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode },
+    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; userRpcConstant?: number },
   ): void {
     const viewId = options?.viewId ?? 1;
     const mode = options?.mode ?? RpcMode.All;
     for (const session of this.raknet.clients.values()) {
       if (options?.exclude && session.id === options.exclude.id) continue;
-      this.sendRpcTo(session, methodName, params, viewId, mode);
+      this.sendRpcTo(session, methodName, params, viewId, mode, options?.userRpcConstant);
     }
   }
 
@@ -211,6 +211,7 @@ export class UnityServer {
     params: RpcParam[],
     viewId: number,
     mode: RpcMode,
+    userRpcConstant?: number,
   ): void {
     let sent = this.rpcSentMethods.get(session.id);
     if (!sent) {
@@ -223,9 +224,9 @@ export class UnityServer {
 
     let result: { data: Uint8Array; bitLength: number };
     if (sent.has(methodName) && hasMethodIndex(methodName)) {
-      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode });
+      result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode, userRpcConstant });
     } else {
-      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode });
+      result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode, userRpcConstant });
       if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 
