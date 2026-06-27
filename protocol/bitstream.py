@@ -1,6 +1,10 @@
 import struct
 
 
+class BitStreamError(Exception):
+    pass
+
+
 class BitStream:
     """Bit-level reader/writer for Unity/RakNet wire format.
 
@@ -39,6 +43,9 @@ class BitStream:
     # ── Read operations ──
 
     def read_bit(self):
+        if self._pos >= self._bit_length:
+            raise BitStreamError(
+                f"read past end: pos={self._pos}, length={self._bit_length}")
         byte_idx = self._pos >> 3
         bit_idx = 7 - (self._pos & 7)
         self._pos += 1

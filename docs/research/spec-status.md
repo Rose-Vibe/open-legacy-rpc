@@ -3,7 +3,7 @@
 Current status of every section in the wire format reference spec,
 plus known unknowns and issues discovered during implementation.
 
-Last updated: 2026-06-26
+Last updated: 2026-06-27
 
 ---
 
@@ -193,7 +193,7 @@ Features the distance-server project requires, mapped against our implementation
 | Network.SetLevelPrefix | No | Documented (no wire format) | No |
 | Network.Instantiate | No | Decode-only | No |
 | Buffered RPCs | No | Not implemented | No |
-| Master Server | Yes (registration) | **Out of scope** (separate protocol) | N/A |
+| Master Server | Yes (registration) | Implemented in Python + TS (M15), cross-language tested | No |
 | NetworkViewID as param | Yes (3 IDs per car) | Implemented, tested | No |
 | NetworkPlayer as param | Yes (as RPC target) | Implemented, tested | No |
 
@@ -207,4 +207,6 @@ All six gaps identified pre-M10 have been closed:
 5. Password auth interop — bidirectional Python↔Unity tested (M10e)
 6. Large byte[] payloads — tested up to 10KB with split packets (M10c)
 
-**Remaining gap:** Master Server registration (out of scope — separate protocol).
+**Remaining gap:** None. Master Server implemented in M15 (Python + TS,
+cross-language conformance tested). Full wire format spec at
+`docs/research/master-server-wire-format.md`.

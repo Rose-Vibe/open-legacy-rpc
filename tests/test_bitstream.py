@@ -207,6 +207,78 @@ def test_remaining():
     assert bs.remaining == 7
 
 
+def test_read_past_end_raises():
+    """Reading past bit_length raises BitStreamError."""
+    from protocol.bitstream import BitStreamError
+    bs = BitStream(b'\xff', bit_length=4)
+    bs.read_bits(4)
+    try:
+        bs.read_bit()
+        assert False, "should have raised BitStreamError"
+    except BitStreamError:
+        pass
+
+
+def test_read_past_end_empty():
+    """Reading from empty stream raises BitStreamError."""
+    from protocol.bitstream import BitStreamError
+    bs = BitStream(b'', bit_length=0)
+    try:
+        bs.read_bit()
+        assert False, "should have raised BitStreamError"
+    except BitStreamError:
+        pass
+
+
+def test_float_nan_roundtrip():
+    """NaN round-trips through BitStream."""
+    import math
+    bs = BitStream()
+    bs.write_float_be(float('nan'))
+    bs.pos = 0
+    assert math.isnan(bs.read_float_be())
+
+
+def test_float_infinity_roundtrip():
+    """Infinity round-trips through BitStream."""
+    bs = BitStream()
+    bs.write_float_be(float('inf'))
+    bs.write_float_be(float('-inf'))
+    bs.pos = 0
+    assert bs.read_float_be() == float('inf')
+    assert bs.read_float_be() == float('-inf')
+
+
+def test_float_negative_zero_roundtrip():
+    """-0.0 round-trips through BitStream."""
+    bs = BitStream()
+    bs.write_float_be(-0.0)
+    bs.pos = 0
+    val = bs.read_float_be()
+    assert val == 0.0
+    assert struct.pack('>f', val) == struct.pack('>f', -0.0)
+
+
+def test_float_denorm_roundtrip():
+    """Smallest positive float32 subnormal round-trips."""
+    denorm = 1.401298464324817e-45
+    bs = BitStream()
+    bs.write_float_be(denorm)
+    bs.pos = 0
+    val = bs.read_float_be()
+    assert struct.pack('>f', val) == struct.pack('>f', denorm)
+
+
+def test_i32_boundary_values():
+    """INT32_MIN and INT32_MAX round-trip correctly."""
+    bs = BitStream()
+    bs.write_i32_be(-2147483648)
+    bs.write_i32_be(2147483647)
+    bs.pos = 0
+    assert bs.read_i32_be() == -2147483648
+    assert bs.read_i32_be() == 2147483647
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]

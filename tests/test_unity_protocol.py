@@ -504,6 +504,51 @@ def test_instantiate_group_flags_matches_capture():
     assert 0x002c - 0x0004 == 5 * 8
 
 
+def test_rpc_counter_overflow_wraps_at_128():
+    """RPC counter wraps at 128 (single byte, *2)."""
+    for counter in range(501):
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        decoded = decode_rpc(data, bits)
+        assert decoded['rpc_counter'] == counter % 128, \
+            f"counter={counter}: expected {counter % 128}, got {decoded['rpc_counter']}"
+
+
+def test_rpc_counter_overflow_first_use():
+    """First-use encoding also wraps counter at 128."""
+    for counter in [0, 127, 128, 200, 255, 500]:
+        data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        decoded = decode_rpc(data, bits)
+        assert decoded['rpc_counter'] == counter % 128, \
+            f"counter={counter}: expected {counter % 128}, got {decoded['rpc_counter']}"
+
+
+def test_float_denorm_roundtrip():
+    """Denormalized float round-trips through BitStream."""
+    denorm = 1.401298464324817e-45  # smallest positive float32 subnormal
+    bs = BitStream()
+    bs.write_float_be(denorm)
+    bs.pos = 0
+    val = bs.read_float_be()
+    assert struct.pack('>f', val) == struct.pack('>f', denorm)
+
+
+def test_float_edge_cross_language_bytes():
+    """Float edge values produce known IEEE 754 bytes (cross-language reference)."""
+    cases = [
+        (float('nan'), '7fc00000'),
+        (float('inf'), '7f800000'),
+        (float('-inf'), 'ff800000'),
+        (-0.0, '80000000'),
+        (1.401298464324817e-45, '00000001'),  # smallest subnormal
+    ]
+    for val, expected_hex in cases:
+        bs = BitStream()
+        bs.write_float_be(val)
+        actual = bs.to_bytes().hex()
+        assert actual == expected_hex, \
+            f"value={val}: expected {expected_hex}, got {actual}"
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]

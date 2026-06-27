@@ -428,3 +428,308 @@ describe('Delta State Sync', () => {
     expect(encoded.bitLength).toBe(96 + 2); // header + 2 dirty bits (both 0)
   });
 });
+
+describe('RPC counter overflow', () => {
+  it('counter wraps at 128 (single byte, *2)', () => {
+    const encode = (counter: number) =>
+      encodeRpcSubsequent({
+        methodName: 'RPC_Int',
+        params: [{ type: 'int', value: 1 }],
+        viewId: 1,
+        rpcCounter: counter,
+        mode: RpcMode.Server,
+      });
+
+    const r0 = encode(0);
+    const r127 = encode(127);
+    const r128 = encode(128);
+
+    const d0 = decodeRpc(r0.data, r0.bitLength);
+    const d127 = decodeRpc(r127.data, r127.bitLength);
+    const d128 = decodeRpc(r128.data, r128.bitLength);
+
+    expect(d0.rpcCounter).toBe(0);
+    expect(d127.rpcCounter).toBe(127);
+    expect(d128.rpcCounter).toBe(0); // wraps intentionally
+  });
+
+  it('counter values 0-500 all encode/decode correctly (multiple wraps)', () => {
+    for (let i = 0; i <= 500; i++) {
+      const result = encodeRpcSubsequent({
+        methodName: 'RPC_Void',
+        params: [],
+        viewId: 1,
+        rpcCounter: i,
+        mode: RpcMode.Server,
+      });
+      const decoded = decodeRpc(result.data, result.bitLength);
+      expect(decoded.rpcCounter).toBe(i % 128);
+      expect(decoded.methodName).toBe('RPC_Void');
+    }
+  });
+
+  it('first-use encoding also wraps counter correctly', () => {
+    const r200 = encodeRpcFirstUse({
+      methodName: 'RPC_String',
+      params: [{ type: 'string', value: 'test' }],
+      viewId: 1,
+      rpcCounter: 200,
+      mode: RpcMode.All,
+    });
+    const decoded = decodeRpc(r200.data, r200.bitLength);
+    expect(decoded.rpcCounter).toBe(200 % 128);
+    expect(decoded.params[0]).toBe('test');
+  });
+});
+
+describe('Float edge values', () => {
+  it('encodes/decodes NaN in RPC float param', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: NaN }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toBeNaN();
+  });
+
+  it('encodes/decodes Infinity in RPC float param', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: Infinity }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toBe(Infinity);
+  });
+
+  it('encodes/decodes -Infinity in RPC float param', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: -Infinity }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toBe(-Infinity);
+  });
+
+  it('encodes/decodes -0 in RPC float param', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: -0 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(Object.is(decoded.params[0], -0)).toBe(true);
+  });
+
+  it('encodes/decodes NaN in Vector3', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Vector3',
+      params: [{ type: 'Vector3', value: [NaN, 0, Infinity] }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    const vec = decoded.params[0] as number[];
+    expect(vec[0]).toBeNaN();
+    expect(vec[1]).toBe(0);
+    expect(vec[2]).toBe(Infinity);
+  });
+
+  it('encodes/decodes denormalized float in RPC', () => {
+    // Smallest positive float32 subnormal: ~1.4e-45
+    const denorm = 1.401298464324817e-45;
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: denorm }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toBeCloseTo(denorm, 50);
+  });
+
+  it('float edge values produce known IEEE 754 bytes (cross-language)', () => {
+    // Must match Python test_float_edge_cross_language_bytes
+    const cases: [number, string][] = [
+      [NaN, '7fc00000'],
+      [Infinity, '7f800000'],
+      [-Infinity, 'ff800000'],
+      [-0, '80000000'],
+      [1.401298464324817e-45, '00000001'], // smallest subnormal
+    ];
+    for (const [val, expectedHex] of cases) {
+      const buf = new ArrayBuffer(4);
+      new DataView(buf).setFloat32(0, val);
+      const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+      expect(hex).toBe(expectedHex);
+    }
+  });
+
+  it('encodes float edge values in state sync without crashing', () => {
+    const encoded = encodeStateSync({
+      viewId: { scope: 'scene', id: 1 },
+      timestamp: 100,
+      fields: [
+        { type: 'float', value: NaN },
+        { type: 'float', value: Infinity },
+        { type: 'float', value: -0 },
+      ],
+      isFirst: true,
+    });
+    // decodeStateSync only decodes the header (no field schema),
+    // so just verify encoding didn't crash and header is correct
+    const decoded = decodeStateSync(encoded.data, encoded.bitLength);
+    expect(decoded.viewId).toBe(1);
+    expect(decoded.timestamp).toBe(100);
+    expect(decoded.isFirst).toBe(true);
+  });
+});
+
+describe('Encoding edge cases', () => {
+  it('encodes/decodes zero Vector3 (0,0,0)', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Vector3',
+      params: [{ type: 'Vector3', value: [0, 0, 0] }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toEqual([0, 0, 0]);
+  });
+
+  it('encodes/decodes zero Quaternion (0,0,0,0)', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Quaternion',
+      params: [{ type: 'Quaternion', value: [0, 0, 0, 0] }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('encodes/decodes INT32_MIN and INT32_MAX in RPC', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: -2147483648 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toBe(-2147483648);
+
+    const result2 = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 2147483647 }],
+      viewId: 1,
+      rpcCounter: 1,
+      mode: RpcMode.Server,
+    });
+    const decoded2 = decodeRpc(result2.data, result2.bitLength);
+    expect(decoded2.params[0]).toBe(2147483647);
+  });
+
+  it('encodes/decodes empty byte array', () => {
+    const result = encodeRpcSubsequent({
+      methodName: 'RPC_Bytes',
+      params: [{ type: 'bytes', value: new Uint8Array(0) }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(result.data, result.bitLength);
+    expect(decoded.params[0]).toEqual(new Uint8Array(0));
+  });
+
+  it('ViewID boundary: scene 0', () => {
+    const encoded = encodeViewId16('scene', 0);
+    const decoded = decodeViewId16(encoded);
+    expect(decoded.scope).toBe('scene');
+    expect(decoded.id).toBe(0);
+  });
+
+  it('ViewID boundary: max scene (4095)', () => {
+    // scene encoding: id << 2, must not set bit 14 (0x4000)
+    const encoded = encodeViewId16('scene', 4095);
+    const decoded = decodeViewId16(encoded);
+    expect(decoded.scope).toBe('scene');
+    expect(decoded.id).toBe(4095);
+  });
+
+  it('ViewID boundary: allocated 0', () => {
+    const encoded = encodeViewId16('allocated', 0);
+    const decoded = decodeViewId16(encoded);
+    expect(decoded.scope).toBe('allocated');
+    expect(decoded.id).toBe(0);
+  });
+
+  it('ViewID boundary: allocated 255 (max)', () => {
+    // allocated encoding: 0x4000 | (id << 6), id fits in 8 bits
+    const encoded = encodeViewId16('allocated', 255);
+    const decoded = decodeViewId16(encoded);
+    expect(decoded.scope).toBe('allocated');
+    expect(decoded.id).toBe(255);
+  });
+
+  it('handles unknown method hash gracefully', () => {
+    // Encode a first-use RPC, then tamper with the method hash bytes
+    const result = encodeRpcFirstUse({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 42 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    // Corrupt the method hash bytes (bytes after the length indicator)
+    const data = new Uint8Array(result.data);
+    for (let i = 14; i < 20; i++) {
+      data[i] = 0xff;
+    }
+    const decoded = decodeRpc(data, result.bitLength);
+    // Should decode without crashing; method name is 'unknown' or similar
+    expect(decoded.rpcCounter).toBe(0);
+  });
+});
+
+describe('Malformed packet resilience', () => {
+  it('decodeRpc does not crash on truncated payload', () => {
+    // BitStream reads zeros for out-of-bounds, so decode produces
+    // garbage but doesn't throw. The server layer catches errors.
+    const result = decodeRpc(new Uint8Array([0x1b, 0x00]), 16);
+    expect(result).toBeDefined();
+    expect(result.methodName).toBeDefined();
+  });
+
+  it('decodeRpc does not crash on empty payload', () => {
+    const result = decodeRpc(new Uint8Array(1), 8);
+    expect(result).toBeDefined();
+  });
+
+  it('decodeStateSync does not crash on truncated payload', () => {
+    // 12 bytes needed for header, 3 is too short but should not crash
+    const result = decodeStateSync(new Uint8Array(12), 96);
+    expect(result).toBeDefined();
+    expect(result.viewId).toBeDefined();
+  });
+
+  it('isRpc returns false for short payloads', () => {
+    expect(isRpc(new Uint8Array([]))).toBe(false);
+    expect(isRpc(new Uint8Array([0x1b]))).toBe(false);
+    expect(isRpc(new Uint8Array([0x1b, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+  });
+});

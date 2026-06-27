@@ -129,7 +129,8 @@ def write_client_header(bs, table_name, password=None):
 def decode_update_row(payload):
     bs = BitStream(payload)
     msg_id = bs.read_u8()
-    assert msg_id == ID_DATABASE_UPDATE_ROW
+    if msg_id != ID_DATABASE_UPDATE_ROW:
+        raise ValueError(f"expected msg_id {ID_DATABASE_UPDATE_ROW}, got {msg_id}")
     version, table_name, password = read_client_header(bs)
 
     update_mode = bs.read_u8()
@@ -176,7 +177,8 @@ def encode_update_row(table_name, cells, update_mode=RUM_UPDATE_OR_ADD_ROW,
 def decode_query_request(payload):
     bs = BitStream(payload)
     msg_id = bs.read_u8()
-    assert msg_id == ID_DATABASE_QUERY_REQUEST
+    if msg_id != ID_DATABASE_QUERY_REQUEST:
+        raise ValueError(f"expected msg_id {ID_DATABASE_QUERY_REQUEST}, got {msg_id}")
     version, table_name, password = read_client_header(bs)
 
     num_col_subset = bs.read_u8()
@@ -240,7 +242,8 @@ def encode_query_request(table_name, column_subset=None, filters=None,
 def decode_remove_row(payload):
     bs = BitStream(payload)
     msg_id = bs.read_u8()
-    assert msg_id == ID_DATABASE_REMOVE_ROW
+    if msg_id != ID_DATABASE_REMOVE_ROW:
+        raise ValueError(f"expected msg_id {ID_DATABASE_REMOVE_ROW}, got {msg_id}")
     table_name = read_huffman_string(bs)
     has_password = bs.read_bool()
     password = read_huffman_string(bs) if has_password else None
@@ -268,7 +271,8 @@ def encode_remove_row(table_name, row_id, password=None):
 def decode_query_reply(payload):
     bs = BitStream(payload)
     msg_id = bs.read_u8()
-    assert msg_id == ID_DATABASE_QUERY_REPLY
+    if msg_id != ID_DATABASE_QUERY_REPLY:
+        raise ValueError(f"expected msg_id {ID_DATABASE_QUERY_REPLY}, got {msg_id}")
 
     if bs.remaining < 32:
         return {'columns': [], 'rows': []}
@@ -288,6 +292,8 @@ def decode_query_reply(payload):
         cells = {}
         for _ in range(num_entries):
             cell_idx = bs.read_u32_be()
+            if cell_idx >= len(columns):
+                raise ValueError(f"cell_idx {cell_idx} out of range (have {len(columns)} columns)")
             col = columns[cell_idx]
             value = read_cell(bs, col['type'])
             cells[col['name']] = value

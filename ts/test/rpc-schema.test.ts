@@ -133,6 +133,32 @@ describe('rpcParamsToArgs', () => {
   });
 });
 
+describe('defineRpc edge cases', () => {
+  it('duplicate defineRpc overwrites cleanly', () => {
+    const def1 = defineRpc('DuplicateRpc', {
+      a: { param: 'int', schema: z.number() },
+    });
+    expect(def1.paramTypes).toEqual(['int']);
+    expect(METHOD_SIGNATURES['DuplicateRpc']).toEqual(['int']);
+
+    const def2 = defineRpc('DuplicateRpc', {
+      x: { param: 'string', schema: z.string() },
+      y: { param: 'float', schema: z.number() },
+    });
+    expect(def2.paramTypes).toEqual(['string', 'float']);
+    expect(METHOD_SIGNATURES['DuplicateRpc']).toEqual(['string', 'float']);
+  });
+
+  it('defineRpc with no fields creates void RPC', () => {
+    const def = defineRpc('VoidSchemaRpc', {});
+    expect(def.fieldNames).toEqual([]);
+    expect(def.paramTypes).toEqual([]);
+
+    const params = argsToRpcParams(def, {});
+    expect(params).toEqual([]);
+  });
+});
+
 describe('round-trip', () => {
   it('args → params → args preserves values', () => {
     const def = defineRpc('RoundTripRpc', {
