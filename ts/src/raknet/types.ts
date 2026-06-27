@@ -1,4 +1,4 @@
-export const enum Reliability {
+export enum Reliability {
   UNRELIABLE = 0,
   UNRELIABLE_SEQUENCED = 1,
   RELIABLE = 2,

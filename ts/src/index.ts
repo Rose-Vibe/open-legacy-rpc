@@ -1,4 +1,5 @@
 export { BitStream, BitStreamError } from './bitstream.js';
+export { Reliability } from './raknet/types.js';
 export { UdpSocket } from './raknet/socket.js';
 export {
   encodeString,
@@ -57,7 +58,7 @@ export type {
   StateSyncField,
 } from './unity/state-sync.js';
 export { UnityServer } from './unity/server.js';
-export type { UnityServerOptions } from './unity/server.js';
+export type { UnityServerOptions, StateSyncMessage } from './unity/server.js';
 export { UnityClient } from './unity/client.js';
 export type { ConnectOptions } from './unity/client.js';
 export { ViewIdAllocator } from './services/view-id-allocator.js';
