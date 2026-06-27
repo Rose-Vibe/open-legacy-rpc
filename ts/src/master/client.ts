@@ -38,6 +38,7 @@ export interface RegisterOptions {
   passwordProtected?: boolean;
   useNat?: boolean;
   port?: number;
+  ip?: string;
 }
 
 export class MasterClient {
@@ -72,8 +73,8 @@ export class MasterClient {
 
   async registerHost(options: RegisterOptions, timeout = 5000): Promise<number> {
     const ipBytes = new Uint8Array(16);
-    const placeholder = new TextEncoder().encode('0.0.0.0');
-    ipBytes.set(placeholder);
+    const ipStr = new TextEncoder().encode(options.ip ?? '0.0.0.0');
+    ipBytes.set(ipStr);
 
     const cells: Cell[] = [
       { name: 'NAT', type: NUMERIC, value: options.useNat ? 1.0 : 0.0 },
