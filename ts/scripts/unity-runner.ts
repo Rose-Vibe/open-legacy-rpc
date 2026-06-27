@@ -9,6 +9,7 @@ import { UnityClient } from '../src/unity/client.js';
 import { RPC_MODE_FROM_NAME } from '../src/unity/rpc.js';
 import type { RpcParam } from '../src/unity/rpc.js';
 import type { ClientSession } from '../src/raknet/connection.js';
+import { MasterServer } from '../src/master/server.js';
 
 interface Step {
   action: string;
@@ -197,6 +198,8 @@ class UnityTestRunner {
   private serverRpcs: Map<string, unknown[][]> = new Map();
   private clientRpcs: Map<string, unknown[][]> = new Map();
   private masterPort: number;
+  private masterServer: MasterServer | null = null;
+  private masterRegistrations: Array<{ table: string; rowId: number }> = [];
 
   constructor(
     private scenario: Scenario,
@@ -240,6 +243,13 @@ class UnityTestRunner {
   }
 
   private async cleanup(): Promise<void> {
+    if (this.masterServer) {
+      try {
+        await this.masterServer.stop();
+      } catch {
+        // ignore
+      }
+    }
     if (this.client) {
       try {
         this.client.disconnect();
@@ -490,13 +500,24 @@ class UnityTestRunner {
       await sleep(50);
     },
 
-    startMasterServer: (_step: Step): void => {
-      this.skipped = true;
-      this.failures.push('Master server not implemented in TS (M11 is Python-only)');
+    startMasterServer: async (_step: Step): Promise<void> => {
+      this.masterServer = new MasterServer({ port: this.masterPort });
+      this.masterServer.onRegistration((table, rowId) => {
+        this.masterRegistrations.push({ table, rowId });
+      });
+      await this.masterServer.start();
+      await sleep(50);
     },
 
-    expectMasterRegistration: (_step: Step): void => {
-      // Only reached if startMasterServer didn't fail first
+    expectMasterRegistration: async (step: Step): Promise<void> => {
+      const timeout = ((step.timeout as number) ?? 10) * 1000;
+      const deadline = Date.now() + timeout;
+      while (this.masterRegistrations.length === 0 && Date.now() < deadline) {
+        await sleep(100);
+      }
+      if (this.masterRegistrations.length === 0) {
+        this.failures.push('No master registration received');
+      }
     },
 
     disconnect: async (_step: Step): Promise<void> => {

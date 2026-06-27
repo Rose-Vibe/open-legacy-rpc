@@ -23,7 +23,7 @@ interface TestResult {
   };
 }
 
-const CATEGORIES = ['handshake', 'rpc', 'stateSync', 'multiClient', 'edgeCases'];
+const CATEGORIES = ['handshake', 'rpc', 'stateSync', 'multiClient', 'edgeCases', 'masterServer'];
 const PROJECT_ROOT = new URL('../../', import.meta.url).pathname.replace(/\/$/, '');
 const TSX = new URL('../../ts/node_modules/.bin/tsx', import.meta.url).pathname;
 

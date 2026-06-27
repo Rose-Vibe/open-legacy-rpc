@@ -6,6 +6,9 @@ import { RpcMode, RPC_MODE_FROM_NAME } from '../src/unity/rpc.js';
 import type { RpcParam } from '../src/unity/rpc.js';
 import type { ClientSession } from '../src/raknet/connection.js';
 import type { StateSyncField } from '../src/unity/state-sync.js';
+import { MasterServer } from '../src/master/server.js';
+import { MasterClient } from '../src/master/client.js';
+import type { HostInfo } from '../src/master/client.js';
 
 interface Step {
   action: string;
@@ -41,6 +44,10 @@ const CLIENT_ACTIONS = new Set([
   'connect', 'disconnect', 'assertConnected', 'assertDisconnected',
   'assertPlayerIndex', 'expectConnectTimeout',
 ]);
+const MASTER_BOTH_ACTIONS = new Set([
+  'startMasterServer', 'connectMaster', 'registerHost', 'requestHostList',
+  'assertHostCount', 'assertHostField', 'unregisterHost', 'disconnectMaster',
+]);
 const BOTH_ACTIONS = new Set(['sleep', 'poll']);
 
 const SKIP_WAIT: Record<string, number> = {
@@ -53,7 +60,7 @@ const SKIP_WAIT: Record<string, number> = {
 
 function stepRole(step: Step): 'server' | 'client' | 'both' {
   const action = step.action;
-  if (BOTH_ACTIONS.has(action)) return 'both';
+  if (BOTH_ACTIONS.has(action) || MASTER_BOTH_ACTIONS.has(action)) return 'both';
   if (SERVER_ACTIONS.has(action)) return 'server';
   if (CLIENT_ACTIONS.has(action)) return 'client';
   if (action === 'sendRpc' || action === 'sendStateSync') {
@@ -82,6 +89,12 @@ class PeerTestRunner {
   private clientSyncs: Map<string, Array<{ viewId: number; data: Uint8Array; bitLength: number }>> =
     new Map();
   private clientSessions: Map<string, ClientSession> = new Map();
+  private masterServer: MasterServer | null = null;
+  private masterClients: Map<string, MasterClient> = new Map();
+  private masterPort = 0;
+  private lastHostList: HostInfo[] = [];
+  private hostListResults: Map<string, HostInfo[]> = new Map();
+  private registrations: Map<string, number> = new Map();
 
   constructor(scenario: Scenario & { port?: number }, timeout = 5.0, role: 'server' | 'client' | null = null) {
     this.scenario = scenario;
@@ -112,6 +125,20 @@ class PeerTestRunner {
   }
 
   private async cleanup(): Promise<void> {
+    for (const [, mc] of this.masterClients) {
+      try {
+        await mc.close();
+      } catch {
+        // ignore
+      }
+    }
+    if (this.masterServer) {
+      try {
+        await this.masterServer.stop();
+      } catch {
+        // ignore
+      }
+    }
     for (const [, client] of this.clients) {
       try {
         if (client.connected) client.disconnect();
@@ -524,6 +551,145 @@ class PeerTestRunner {
         this.failures.push(
           `Expected ${String(expectedCount)} server disconnect(s), got ${String(this.serverDisconnected.length)}`,
         );
+      }
+    },
+
+    startMasterServer: async (): Promise<void> => {
+      this.masterPort = nextPort();
+      this.masterServer = new MasterServer({ port: this.masterPort });
+      await this.masterServer.start();
+      await sleep(50);
+    },
+
+    connectMaster: async (step: Step): Promise<void> => {
+      const clientName = (step.client as string) ?? 'default';
+      const mc = new MasterClient();
+      this.masterClients.set(clientName, mc);
+      try {
+        await mc.connect('127.0.0.1', this.masterPort, 5000);
+      } catch (e: unknown) {
+        this.failures.push(
+          `Master connect failed for '${clientName}': ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    },
+
+    registerHost: async (step: Step): Promise<void> => {
+      const clientName = (step.client as string) ?? 'default';
+      const mc = this.masterClients.get(clientName);
+      if (!mc) {
+        this.failures.push(`No master client '${clientName}' for registerHost`);
+        return;
+      }
+      try {
+        const rowId = await mc.registerHost({
+          gameType: step.gameType as string,
+          name: step.name as string,
+          comment: (step.comment as string) ?? '',
+          playerCount: (step.playerCount as number) ?? 0,
+          playerLimit: (step.playerLimit as number) ?? 4,
+          port: (step.port as number) ?? 7777,
+        });
+        const regKey = (step.regKey as string) ?? clientName;
+        this.registrations.set(regKey, rowId);
+      } catch (e: unknown) {
+        this.failures.push(
+          `registerHost failed for '${clientName}': ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    },
+
+    requestHostList: async (step: Step): Promise<void> => {
+      const clientName = (step.client as string) ?? 'default';
+      const mc = this.masterClients.get(clientName);
+      if (!mc) {
+        this.failures.push(`No master client '${clientName}' for requestHostList`);
+        return;
+      }
+      try {
+        const hosts = await mc.requestHostList(step.gameType as string);
+        this.lastHostList = hosts;
+        const resultKey = (step.resultKey as string) ?? '_default';
+        this.hostListResults.set(resultKey, hosts);
+      } catch (e: unknown) {
+        const allowEmpty = step.allowEmpty as boolean | undefined;
+        if (allowEmpty) {
+          this.lastHostList = [];
+          const resultKey = (step.resultKey as string) ?? '_default';
+          this.hostListResults.set(resultKey, []);
+        } else {
+          this.failures.push(
+            `requestHostList failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    },
+
+    assertHostCount: (step: Step): void => {
+      const expected = step.count as number;
+      const resultKey = (step.resultKey as string) ?? '_default';
+      const hosts = this.hostListResults.get(resultKey) ?? this.lastHostList;
+      if (hosts.length !== expected) {
+        this.failures.push(
+          `Expected ${String(expected)} hosts, got ${String(hosts.length)}`,
+        );
+      }
+    },
+
+    assertHostField: (step: Step): void => {
+      const index = step.index as number;
+      const field = step.field as string;
+      const expected = step.value;
+      const resultKey = (step.resultKey as string) ?? '_default';
+      const hosts = this.hostListResults.get(resultKey) ?? this.lastHostList;
+
+      if (index >= hosts.length) {
+        this.failures.push(`Host index ${String(index)} out of range (${String(hosts.length)} hosts)`);
+        return;
+      }
+      const host = hosts[index];
+      if (!host) return;
+
+      const fieldMap: Record<string, string> = {
+        game_name: 'gameName',
+        connected_players: 'connectedPlayers',
+        player_limit: 'playerLimit',
+        password_protected: 'passwordProtected',
+      };
+      const tsField = fieldMap[field] ?? field;
+      const actual = (host as Record<string, unknown>)[tsField];
+      if (actual !== expected) {
+        this.failures.push(
+          `Host[${String(index)}].${field}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+        );
+      }
+    },
+
+    unregisterHost: async (step: Step): Promise<void> => {
+      const clientName = (step.client as string) ?? 'default';
+      const mc = this.masterClients.get(clientName);
+      if (!mc) {
+        this.failures.push(`No master client '${clientName}' for unregisterHost`);
+        return;
+      }
+      const regKey = (step.regKey as string) ?? clientName;
+      const rowId = this.registrations.get(regKey);
+      try {
+        mc.unregisterHost(step.gameType as string, rowId);
+        await sleep(200);
+      } catch (e: unknown) {
+        this.failures.push(
+          `unregisterHost failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    },
+
+    disconnectMaster: async (step: Step): Promise<void> => {
+      const clientName = (step.client as string) ?? 'default';
+      const mc = this.masterClients.get(clientName);
+      if (mc) {
+        await mc.close();
+        this.masterClients.delete(clientName);
       }
     },
   };
