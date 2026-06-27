@@ -16,8 +16,8 @@ shift
 EXTRA_ARGS=("$@")
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLAYER="$REPO_DIR/UnityProject/Builds/Linux/Player.x86_64"
-DLL_SRC="$REPO_DIR/experiments/Experiments.dll"
+PLAYER="${PLAYER_OVERRIDE:-$REPO_DIR/UnityProject/Builds/Linux/Player.x86_64}"
+DLL_SRC="${DLL_OVERRIDE:-$REPO_DIR/experiments/Experiments.dll}"
 CAPTURES_DIR="$REPO_DIR/captures"
 NS="unitynet"
 PORT=7777
