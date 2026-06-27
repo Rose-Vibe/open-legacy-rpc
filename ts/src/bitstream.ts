@@ -31,6 +31,14 @@ export class BitStream {
     this._pos = value;
   }
 
+  get pos(): number {
+    return this._pos;
+  }
+
+  set pos(value: number) {
+    this._pos = value;
+  }
+
   get remaining(): number {
     return this._bitLength - this._pos;
   }

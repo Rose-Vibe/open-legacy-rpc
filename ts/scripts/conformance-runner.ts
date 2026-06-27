@@ -2,6 +2,22 @@ import * as process from 'node:process';
 import { BitStream } from '../src/bitstream.js';
 import { decodeString, encodeBytesForWire } from '../src/huffman.js';
 import { encodeAddress, decodeAddress } from '../src/raknet/address.js';
+import { computeMethodId, computeMethodIndex } from '../src/unity/method-hash.js';
+import { encodeViewId, encodeViewId16 } from '../src/unity/view-id.js';
+import {
+  encodeRpcSubsequent,
+  encodeRpcFirstUse,
+  decodeRpc,
+  RPC_MODE_FROM_NAME,
+} from '../src/unity/rpc.js';
+import type { RpcParam } from '../src/unity/rpc.js';
+import {
+  encodeStateSync,
+  decodeStateSync,
+  encodeDeltaStateSync,
+  decodeDeltaStateSync,
+} from '../src/unity/state-sync.js';
+import type { StateSyncField } from '../src/unity/state-sync.js';
 
 interface TestCase {
   testInfo: { category: string; [k: string]: unknown };
@@ -221,6 +237,154 @@ handlers.set('addressDecode', (inp) => {
   const data = hexToBytes(inp['dataHex'] as string);
   const { ip, port } = decodeAddress(data);
   return { ip, port };
+});
+
+// ── Unity protocol handlers ──
+
+interface RpcParamInput {
+  type: string;
+  value: unknown;
+}
+
+interface ViewIdInput {
+  scope: 'scene' | 'allocated';
+  id: number;
+}
+
+function inputToRpcParams(inp: Record<string, unknown>): RpcParam[] {
+  const rawParams = inp['params'] as RpcParamInput[];
+  return rawParams.map((p) => {
+    if (p.type === 'bytes') {
+      return { type: 'bytes' as const, value: hexToBytes(p.value as string) };
+    }
+    if (p.type === 'Vector3' || p.type === 'Quaternion') {
+      return { type: p.type, value: p.value as number[] };
+    }
+    return { type: p.type as RpcParam['type'], value: p.value as number | string };
+  });
+}
+
+function viewIdInt(vid: ViewIdInput): number {
+  return vid.scope === 'scene' ? vid.id : 0x100000000 + vid.id;
+}
+
+handlers.set('rpcEncode', (inp) => {
+  const params = inputToRpcParams(inp);
+  const mode = RPC_MODE_FROM_NAME[inp['rpcMode'] as string];
+  if (mode === undefined) throw new Error(`Unknown RPC mode: ${inp['rpcMode'] as string}`);
+  const vid = inp['viewId'] as ViewIdInput;
+  const { data, bitLength } = encodeRpcSubsequent({
+    methodName: inp['methodName'] as string,
+    params,
+    viewId: viewIdInt(vid),
+    rpcCounter: inp['rpcCounter'] as number,
+    mode,
+  });
+  return { dataHex: bytesToHex(data), bitLength };
+});
+
+handlers.set('rpcDecode', (inp) => {
+  const d = decodeRpc(hexToBytes(inp['dataHex'] as string), inp['bitLength'] as number);
+  return {
+    methodName: d.methodName,
+    rpcCounter: d.rpcCounter,
+    rpcMode: d.rpcMode,
+  };
+});
+
+handlers.set('rpcFirstUse', (inp) => {
+  const params = inputToRpcParams(inp);
+  const mode = RPC_MODE_FROM_NAME[inp['rpcMode'] as string];
+  if (mode === undefined) throw new Error(`Unknown RPC mode: ${inp['rpcMode'] as string}`);
+  const vid = inp['viewId'] as ViewIdInput;
+  const { data, bitLength } = encodeRpcFirstUse({
+    methodName: inp['methodName'] as string,
+    params,
+    viewId: viewIdInt(vid),
+    rpcCounter: inp['rpcCounter'] as number,
+    mode,
+  });
+  return { dataHex: bytesToHex(data), bitLength };
+});
+
+handlers.set('rpcFirstUseDecode', (inp) => {
+  const d = decodeRpc(hexToBytes(inp['dataHex'] as string), inp['bitLength'] as number);
+  return {
+    methodName: d.methodName,
+    rpcMode: d.rpcMode,
+  };
+});
+
+handlers.set('methodHash', (inp) => {
+  const { classGuid, methodHash } = computeMethodId(inp['methodName'] as string);
+  return { classGuidHex: bytesToHex(classGuid), methodHashHex: bytesToHex(methodHash) };
+});
+
+handlers.set('methodIndex', (inp) => {
+  const idx = computeMethodIndex(inp['methodRid'] as number, inp['interfaceMethodCount'] as number);
+  return { methodIndex: idx };
+});
+
+handlers.set('viewId', (inp) => {
+  const scope = inp['scope'] as string;
+  const id = inp['id'] as number;
+  const vid = scope === 'scene' ? id : 0x100000000 + id;
+  return { dataHex: bytesToHex(encodeViewId(vid)) };
+});
+
+handlers.set('viewIdParam', (inp) => {
+  return { value16: encodeViewId16(inp['scope'] as 'scene' | 'allocated', inp['id'] as number) };
+});
+
+handlers.set('stateSync', (inp) => {
+  const vid = inp['viewId'] as ViewIdInput;
+  const fields = inp['fields'] as StateSyncField[];
+  const { data, bitLength } = encodeStateSync({
+    viewId: vid,
+    timestamp: inp['timestamp'] as number,
+    fields,
+    isFirst: inp['isFirst'] as boolean,
+  });
+  return { dataHex: bytesToHex(data), bitLength };
+});
+
+handlers.set('stateSyncDecode', (inp) => {
+  const d = decodeStateSync(hexToBytes(inp['dataHex'] as string), inp['bitLength'] as number);
+  return {
+    timestamp: d.timestamp,
+    isFirst: d.isFirst,
+    viewIdScope: d.viewIdScope,
+    viewId: d.viewId,
+  };
+});
+
+handlers.set('deltaStateSync', (inp) => {
+  const vid = inp['viewId'] as ViewIdInput;
+  const { data, bitLength } = encodeDeltaStateSync({
+    viewId: vid,
+    timestamp: inp['timestamp'] as number,
+    fieldValues: inp['fieldValues'] as number[],
+    prevValues: inp['prevValues'] as number[],
+    fieldWidths: inp['fieldWidths'] as number[],
+    isFirst: inp['isFirst'] as boolean,
+  });
+  return { dataHex: bytesToHex(data), bitLength };
+});
+
+handlers.set('deltaSyncDecode', (inp) => {
+  const d = decodeDeltaStateSync(
+    hexToBytes(inp['dataHex'] as string),
+    inp['bitLength'] as number,
+    inp['fieldCount'] as number,
+    inp['fieldWidths'] as number[],
+    inp['prevValues'] as number[],
+  );
+  return {
+    timestamp: d.timestamp,
+    isFirst: d.isFirst,
+    dirtyFlags: d.dirtyFlags,
+    fieldValues: d.fieldValues,
+  };
 });
 
 // ── Main ──
