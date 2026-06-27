@@ -129,6 +129,7 @@ export interface RpcEncodeOptions {
   viewId: number;
   rpcCounter: number;
   mode: RpcMode;
+  userRpcConstant?: number;
 }
 
 /** Encode a subsequent-use RPC (method already registered on receiver). */
@@ -159,9 +160,9 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   bs.writeBit(0);
   bs.writeBits(methodIndex, 7);
   bs.writeU16BE(0);
-  const remaining = totalBits - 120;
+  const remaining = totalBits - 121;
   bs.writeU16BE(remaining);
-  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : USER_RPC_CONSTANT;
+  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : (opts.userRpcConstant ?? USER_RPC_CONSTANT);
   bs.writeU16BE(constant);
   bs.writeBits(opts.mode, 4);
   if (opts.mode === RpcMode.Player) {
@@ -206,12 +207,12 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeU8(lengthIndicator);
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
-  const remainingCount = paramBits + 20 + targetBits;
+  const remainingCount = paramBits + 19 + targetBits;
   const methodTag = METHOD_TAG_MAP.get(opts.methodName) ?? 0;
   bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);
   bs.writeU16BE(remainingCount);
-  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : USER_RPC_CONSTANT;
+  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : (opts.userRpcConstant ?? USER_RPC_CONSTANT);
   bs.writeU16BE(constant);
   bs.writeBits(opts.mode, 4);
   if (opts.mode === RpcMode.Player) {

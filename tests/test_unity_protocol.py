@@ -143,10 +143,10 @@ def test_first_use_metadata_remaining_count():
     assert meta_bits[0:4] == '0000'
     # zeros (bits 4-19)
     assert meta_bits[4:20] == '0' * 16
-    # remaining_bit_count (bits 20-35): param_bits(32) + 20 = 52
+    # remaining_bit_count (bits 20-35): param_bits(32) + 19 = 51
     remaining = int(meta_bits[20:36], 2)
-    assert remaining == 52
-    # constant 0x2000 (bits 36-51)
+    assert remaining == 51
+    # constant 0x2000 (bits 36-51) — default; configurable per-game
     const = int(meta_bits[36:52], 2)
     assert const == 0x2000
 
@@ -674,17 +674,17 @@ def test_user_rpc_constant_value():
 
 
 def test_subsequent_remaining_bit_count():
-    """Subsequent-use remaining count is total_bits - 120."""
+    """Subsequent-use remaining count is total_bits - 121."""
     data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, rpc_counter=0)
     all_bits = ''.join(f'{b:08b}' for b in data)
     remaining_bits = all_bits[104:120]
     remaining = int(remaining_bits, 2)
-    assert remaining == bits - 120, \
-        f"Expected {bits - 120}, got {remaining}"
+    assert remaining == bits - 121, \
+        f"Expected {bits - 121}, got {remaining}"
 
 
 def test_first_use_remaining_bit_count():
-    """First-use remaining count is param_bits + 20 + target_bits."""
+    """First-use remaining count is param_bits + 19 + target_bits."""
     data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=0)
     all_bits = ''.join(f'{b:08b}' for b in data)
     guid, hash_val = compute_method_id('RPC_Int')
@@ -694,8 +694,8 @@ def test_first_use_remaining_bit_count():
     remaining_bits = all_bits[remaining_start:remaining_start + 16]
     remaining = int(remaining_bits, 2)
     # param_bits=32 (int), target_bits=0 (Server mode)
-    assert remaining == 32 + 20 + 0, \
-        f"Expected 52, got {remaining}"
+    assert remaining == 32 + 19 + 0, \
+        f"Expected 51, got {remaining}"
 
 
 if __name__ == '__main__':

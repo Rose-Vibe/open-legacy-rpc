@@ -250,7 +250,7 @@ def decode_view_id_16(val16):
 
 
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
-                          mode=RPCMode.Server):
+                          mode=RPCMode.Server, user_rpc_constant=None):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
     method_index = METHOD_INDEX_MAP.get(method_name)
     if method_index is None:
@@ -281,11 +281,10 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bits(method_index, 7)
     # 16 bits of zeros
     bs.write_u16_be(0)
-    # remaining_bit_count = total_bit_length - 120
-    remaining = total_bits - 120
+    # remaining_bit_count = total_bit_length - 121
+    remaining = total_bits - 121
     bs.write_u16_be(remaining)
-    # constant: 0x0000 for internal RPCs, 0x2000 for user RPCs
-    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else USER_RPC_CONSTANT
+    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else (user_rpc_constant if user_rpc_constant is not None else USER_RPC_CONSTANT)
     bs.write_u16_be(constant)
     # RPCMode (4 bits)
     bs.write_bits(int(mode), 4)
@@ -301,7 +300,7 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
 
 
 def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
-                         mode=RPCMode.Server):
+                         mode=RPCMode.Server, user_rpc_constant=None):
     """Encode a first-use RPC (includes method name hash)."""
     class_guid, method_hash = get_method_id(method_name)
     method_id_bits = (len(class_guid) + len(method_hash)) * 8
@@ -333,12 +332,12 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
     # 52-bit internal metadata: method_tag(4) + zeros(16) + remaining_count(16) + constant(16)
-    remaining_count = param_bits + 20 + target_bits
+    remaining_count = param_bits + 19 + target_bits
     method_tag = METHOD_TAG_MAP.get(method_name, 0)
     bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
     bs.write_u16_be(remaining_count)
-    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else USER_RPC_CONSTANT
+    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else (user_rpc_constant if user_rpc_constant is not None else USER_RPC_CONSTANT)
     bs.write_u16_be(constant)
     # RPCMode (4 bits)
     bs.write_bits(int(mode), 4)
