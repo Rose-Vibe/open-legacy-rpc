@@ -141,7 +141,7 @@ def register_method_index_table(method_entries):
             register_method_names([name])
 
 INTERNAL_RPC_CONSTANT = 0x0000
-USER_RPC_CONSTANT = 0x0002
+USER_RPC_CONSTANT = 0x2000
 
 INTERNAL_RPCS = {
     '__RPCNetworkInstantiate',
@@ -199,6 +199,22 @@ def _register_loader_assembly():
 
 _register_loader_assembly()
 
+METHOD_TAG_MAP = {}
+
+
+def register_method_tag(method_name, tag):
+    """Register a method_tag value for first-use RPC encoding.
+
+    method_tag is the RPC method's ordinal position within Unity's
+    MonoBehaviour class hierarchy, multiplied by 4.
+    """
+    METHOD_TAG_MAP[method_name] = tag
+
+
+def register_method_tags(tags):
+    """Register multiple method tags from a dict of {name: tag}."""
+    METHOD_TAG_MAP.update(tags)
+
 
 def encode_view_id(view_id):
     """Encode a NetworkViewID as 48-bit big-endian bytes."""
@@ -254,10 +270,10 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     bs.write_u8(MSG_ID_RPC)
     # ViewID (48 bits)
     bs.write_bytes(encode_view_id(view_id))
-    # Invocation metadata (24 bits)
-    counter_byte = (rpc_counter * 2) & 0xFF
-    bs.write_u8(counter_byte)
-    bs.write_u8(0x00)
+    # Counter (16-bit): (rpc_counter * 2) split into high/low bytes
+    counter16 = (rpc_counter * 2) & 0xFFFF
+    bs.write_u8((counter16 >> 8) & 0xFF)
+    bs.write_u8(counter16 & 0xFF)
     bs.write_u8(0x0b)
     # first_use = 0
     bs.write_bit(0)
@@ -265,10 +281,10 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bits(method_index, 7)
     # 16 bits of zeros
     bs.write_u16_be(0)
-    # remaining_bit_count = total_bit_length - 121
-    remaining = total_bits - 121
+    # remaining_bit_count = total_bit_length - 120
+    remaining = total_bits - 120
     bs.write_u16_be(remaining)
-    # constant: 0x0000 for internal RPCs, 0x0002 for user RPCs
+    # constant: 0x0000 for internal RPCs, 0x2000 for user RPCs
     constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else USER_RPC_CONSTANT
     bs.write_u16_be(constant)
     # RPCMode (4 bits)
@@ -304,9 +320,10 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
     bs.write_bytes(encode_view_id(view_id))
-    counter_byte = (rpc_counter * 2) & 0xFF
-    bs.write_u8(counter_byte)
-    bs.write_u8(0x00)
+    # Counter (16-bit): (rpc_counter * 2) split into high/low bytes
+    counter16 = (rpc_counter * 2) & 0xFFFF
+    bs.write_u8((counter16 >> 8) & 0xFF)
+    bs.write_u8(counter16 & 0xFF)
     bs.write_u8(0x0b)
     bs.write_bit(1)
     bs.write_bits(0, 7)
@@ -316,8 +333,9 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
     # 52-bit internal metadata: method_tag(4) + zeros(16) + remaining_count(16) + constant(16)
-    remaining_count = param_bits + 19 + target_bits
-    bs.write_bits(0, 4)       # method_tag (unknown derivation, 0 is accepted)
+    remaining_count = param_bits + 20 + target_bits
+    method_tag = METHOD_TAG_MAP.get(method_name, 0)
+    bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
     bs.write_u16_be(remaining_count)
     constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else USER_RPC_CONSTANT
@@ -341,9 +359,10 @@ def decode_rpc(payload, bit_length):
 
     result['msg_id'] = bs.read_u8()
     result['view_id'] = decode_view_id_bits(bs)
-    counter_byte = bs.read_u8()
-    result['rpc_counter'] = counter_byte // 2
-    bs.read_bits(16)  # rest of invocation metadata
+    counter_high = bs.read_u8()
+    counter_low = bs.read_u8()
+    result['rpc_counter'] = ((counter_high << 8) | counter_low) >> 1
+    bs.read_bits(8)  # 0x0b marker
     first_use = bs.read_bit()
     result['first_use'] = bool(first_use)
 

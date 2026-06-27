@@ -29,6 +29,7 @@ ID_OPEN_CONNECTION_REPLY = 0x0A
 ID_CONNECTION_REQUEST_ACCEPTED = 0x0E
 ID_NEW_INCOMING_CONNECTION = 0x11
 ID_DISCONNECTION_NOTIFICATION = 0x15
+ID_DISCONNECTION_NOTIFICATION_LEGACY = 0x13
 
 # Unity message IDs
 ID_UNITY_RPC_OR_SYNC = 0x1B
@@ -154,7 +155,7 @@ class RakNetClient:
         elif msg_id == ID_UNITY_PLAYER_ASSIGNMENT:
             self._handle_player_assignment(payload)
             return True
-        elif msg_id == ID_DISCONNECTION_NOTIFICATION:
+        elif msg_id in (ID_DISCONNECTION_NOTIFICATION, ID_DISCONNECTION_NOTIFICATION_LEGACY):
             self.state = ConnectionState.DISCONNECTED
             return True
         return False
@@ -360,7 +361,7 @@ class RakNetServer:
             if self._unity_protocol:
                 self._handle_player_ready(addr, payload)
             return True
-        elif msg_id == ID_DISCONNECTION_NOTIFICATION:
+        elif msg_id in (ID_DISCONNECTION_NOTIFICATION, ID_DISCONNECTION_NOTIFICATION_LEGACY):
             self._handle_disconnect(addr)
             return True
         return False

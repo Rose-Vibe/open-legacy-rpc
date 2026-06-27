@@ -11,6 +11,7 @@ from protocol.unity_protocol import (
     encode_view_id_16, decode_view_id_16,
     encode_instantiate_group_flags, decode_instantiate_group_flags,
     encode_instantiate_params, decode_instantiate_params,
+    METHOD_TAG_MAP, register_method_tag, register_method_tags,
 )
 from protocol.bitstream import BitStream
 
@@ -142,12 +143,12 @@ def test_first_use_metadata_remaining_count():
     assert meta_bits[0:4] == '0000'
     # zeros (bits 4-19)
     assert meta_bits[4:20] == '0' * 16
-    # remaining_bit_count (bits 20-35): param_bits(32) + 19 = 51
+    # remaining_bit_count (bits 20-35): param_bits(32) + 20 = 52
     remaining = int(meta_bits[20:36], 2)
-    assert remaining == 51
-    # constant 0x0002 (bits 36-51)
+    assert remaining == 52
+    # constant 0x2000 (bits 36-51)
     const = int(meta_bits[36:52], 2)
-    assert const == 0x0002
+    assert const == 0x2000
 
 
 def test_first_use_metadata_with_variable_params():
@@ -356,8 +357,8 @@ def test_internal_rpc_constant_zero():
         del METHOD_SIGNATURES['__RPCNetworkInstantiate']
 
 
-def test_user_rpc_constant_two():
-    """First-use encoding of user RPCs uses constant=0x0002."""
+def test_user_rpc_constant_0x2000():
+    """First-use encoding of user RPCs uses constant=0x2000."""
     payload, bits = encode_rpc_first_use('RPC_Int', [42])
     all_bits = ''.join(f'{b:08b}' for b in payload)
     meta_start = 176  # known for RPC_Int
@@ -537,22 +538,22 @@ def test_encode_params_zero_values_not_treated_as_missing():
     assert decoded_bytes['params'][0] == b''
 
 
-def test_rpc_counter_overflow_wraps_at_128():
-    """RPC counter wraps at 128 (single byte, *2)."""
-    for counter in range(501):
+def test_rpc_counter_overflow_wraps_at_32768():
+    """RPC counter wraps at 32768 (16-bit, *2)."""
+    for counter in [0, 100, 32767, 32768, 50000, 65535]:
         data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 128, \
-            f"counter={counter}: expected {counter % 128}, got {decoded['rpc_counter']}"
+        assert decoded['rpc_counter'] == counter % 32768, \
+            f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
 
 
 def test_rpc_counter_overflow_first_use():
-    """First-use encoding also wraps counter at 128."""
-    for counter in [0, 127, 128, 200, 255, 500]:
+    """First-use encoding also wraps counter at 32768."""
+    for counter in [0, 127, 128, 32767, 32768, 50000]:
         data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 128, \
-            f"counter={counter}: expected {counter % 128}, got {decoded['rpc_counter']}"
+        assert decoded['rpc_counter'] == counter % 32768, \
+            f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
 
 
 def test_float_denorm_roundtrip():
@@ -615,6 +616,86 @@ def test_bytes_param_size_limit():
     count_bs.pos = 0
     with pytest.raises(ValueError, match="bytes param too large"):
         _decode_params(count_bs, ['bytes'])
+
+
+def test_method_tag_registration():
+    """Registering a method_tag puts it into first-use encoding."""
+    register_method_tag('RPC_Int', 8)
+    try:
+        payload, bits = encode_rpc_first_use('RPC_Int', [42])
+        all_bits = ''.join(f'{b:08b}' for b in payload)
+        guid, hash_val = compute_method_id('RPC_Int')
+        method_id_bits = (len(guid) + len(hash_val)) * 8
+        hash_extra_bits = method_id_bits - 48
+        tag_start = 160 + hash_extra_bits
+        tag_bits = all_bits[tag_start:tag_start + 4]
+        assert int(tag_bits, 2) == 8, \
+            f"Expected method_tag=8, got {int(tag_bits, 2)}"
+    finally:
+        METHOD_TAG_MAP.pop('RPC_Int', None)
+
+
+def test_method_tag_defaults_to_zero():
+    """Unregistered methods use method_tag=0."""
+    METHOD_TAG_MAP.pop('RPC_Int', None)
+    payload, bits = encode_rpc_first_use('RPC_Int', [42])
+    all_bits = ''.join(f'{b:08b}' for b in payload)
+    guid, hash_val = compute_method_id('RPC_Int')
+    method_id_bits = (len(guid) + len(hash_val)) * 8
+    hash_extra_bits = method_id_bits - 48
+    tag_start = 160 + hash_extra_bits
+    tag_bits = all_bits[tag_start:tag_start + 4]
+    assert int(tag_bits, 2) == 0
+
+
+def test_register_method_tags_bulk():
+    """register_method_tags registers multiple tags at once."""
+    register_method_tags({'RPC_Alpha': 4, 'RPC_Beta': 12})
+    try:
+        assert METHOD_TAG_MAP['RPC_Alpha'] == 4
+        assert METHOD_TAG_MAP['RPC_Beta'] == 12
+    finally:
+        METHOD_TAG_MAP.pop('RPC_Alpha', None)
+        METHOD_TAG_MAP.pop('RPC_Beta', None)
+
+
+def test_16bit_counter_high_values():
+    """Counter values up to 32767 survive encode→decode roundtrip."""
+    for counter in [255, 256, 1000, 16383, 32767]:
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        decoded = decode_rpc(data, bits)
+        assert decoded['rpc_counter'] == counter, \
+            f"counter={counter}: got {decoded['rpc_counter']}"
+
+
+def test_user_rpc_constant_value():
+    """USER_RPC_CONSTANT is 0x2000."""
+    assert USER_RPC_CONSTANT == 0x2000
+
+
+def test_subsequent_remaining_bit_count():
+    """Subsequent-use remaining count is total_bits - 120."""
+    data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, rpc_counter=0)
+    all_bits = ''.join(f'{b:08b}' for b in data)
+    remaining_bits = all_bits[104:120]
+    remaining = int(remaining_bits, 2)
+    assert remaining == bits - 120, \
+        f"Expected {bits - 120}, got {remaining}"
+
+
+def test_first_use_remaining_bit_count():
+    """First-use remaining count is param_bits + 20 + target_bits."""
+    data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=0)
+    all_bits = ''.join(f'{b:08b}' for b in data)
+    guid, hash_val = compute_method_id('RPC_Int')
+    method_id_bits = (len(guid) + len(hash_val)) * 8
+    hash_extra_bits = method_id_bits - 48
+    remaining_start = 160 + hash_extra_bits + 20
+    remaining_bits = all_bits[remaining_start:remaining_start + 16]
+    remaining = int(remaining_bits, 2)
+    # param_bits=32 (int), target_bits=0 (Server mode)
+    assert remaining == 32 + 20 + 0, \
+        f"Expected 52, got {remaining}"
 
 
 if __name__ == '__main__':
