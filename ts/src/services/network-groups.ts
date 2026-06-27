@@ -5,6 +5,7 @@ export class NetworkGroups {
   private clientSubscriptions = new Map<string, Set<number>>();
   private clientSessions = new Map<string, ClientSession>();
 
+  /** Add a client session. Auto-subscribes to group 0. */
   addClient(session: ClientSession): void {
     this.clientSessions.set(session.id, session);
     this.clientSubscriptions.set(session.id, new Set([0]));

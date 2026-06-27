@@ -268,17 +268,25 @@ def _unpack_ack_ranges(data):
 class SplitPacketAssembler:
     """Reassembles split (fragmented) encapsulated messages."""
 
+    MAX_PENDING = 64
+    MAX_AGE = 30.0
+
     def __init__(self):
         self._pending = {}  # split_packet_id -> {index: payload, ...}
         self._counts = {}   # split_packet_id -> expected count
+        self._timestamps = {}  # split_packet_id -> creation time
 
     def add(self, msg):
         """Add a split fragment. Returns the reassembled EncapsulatedMessage
         if all fragments have arrived, else None."""
+        now = time.monotonic()
+        self._prune(now)
+
         sid = msg.split_packet_id
         if sid not in self._pending:
             self._pending[sid] = {}
             self._counts[sid] = msg.split_packet_count
+            self._timestamps[sid] = now
         self._pending[sid][msg.split_packet_index] = msg.payload
 
         if len(self._pending[sid]) == self._counts[sid]:
@@ -286,6 +294,7 @@ class SplitPacketAssembler:
             full_payload = b''.join(parts)
             del self._pending[sid]
             del self._counts[sid]
+            del self._timestamps[sid]
             reassembled = EncapsulatedMessage(full_payload, msg.reliability)
             reassembled.reliable_msg_number = msg.reliable_msg_number
             reassembled.ordering_index = msg.ordering_index
@@ -293,6 +302,19 @@ class SplitPacketAssembler:
             reassembled.bit_length = len(full_payload) * 8
             return reassembled
         return None
+
+    def _prune(self, now):
+        expired = [sid for sid, ts in self._timestamps.items()
+                   if now - ts > self.MAX_AGE]
+        for sid in expired:
+            self._pending.pop(sid, None)
+            self._counts.pop(sid, None)
+            self._timestamps.pop(sid, None)
+        while len(self._pending) >= self.MAX_PENDING:
+            oldest = min(self._timestamps, key=self._timestamps.get)
+            self._pending.pop(oldest, None)
+            self._counts.pop(oldest, None)
+            self._timestamps.pop(oldest, None)
 
 
 class RakNetPeer:
@@ -339,7 +361,7 @@ class RakNetPeer:
 
         seq = self._send_seq
         datagram = pack_datagram(seq, [msg], self.get_timestamp())
-        self._send_seq += 1
+        self._send_seq = (self._send_seq + 1) & 0xFFFFFF
         self.send_raw(datagram)
 
         if msg.is_reliable:
@@ -413,7 +435,7 @@ class RakNetPeer:
             if now - send_time > timeout:
                 new_seq = self._send_seq
                 datagram = pack_datagram(new_seq, [msg], self.get_timestamp())
-                self._send_seq += 1
+                self._send_seq = (self._send_seq + 1) & 0xFFFFFF
                 self.send_raw(datagram)
                 del self._unacked_reliable[old_seq]
                 self._unacked_reliable[new_seq] = (msg, now)

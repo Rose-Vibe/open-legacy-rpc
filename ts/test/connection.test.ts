@@ -381,4 +381,23 @@ describe('RakNetClient', () => {
     expect(client.viewIdBase).toBe(50); // blockStart(1) * stride(50)
     await client.close();
   });
+
+  it('clears tickTimer on connection timeout', async () => {
+    vi.useFakeTimers();
+    const clientSocket = createMockSocket(12345);
+    const client = new RakNetClient(clientSocket);
+
+    // Attach rejection handler immediately so it's not "unhandled"
+    const connectPromise = client
+      .connect('127.0.0.1', 7777, { timeout: 200 })
+      .catch((e: Error) => e);
+
+    await vi.advanceTimersByTimeAsync(300);
+    const result = await connectPromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe('Connection timed out');
+
+    // tickTimer should have been cleaned up
+    expect((client as unknown as Record<string, unknown>).tickTimer).toBeNull();
+  });
 });

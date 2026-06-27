@@ -356,16 +356,30 @@ export class RakNetClient {
     }, 66);
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
       const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (this.tickTimer) {
+          clearInterval(this.tickTimer);
+          this.tickTimer = null;
+        }
         reject(new Error('Connection timed out'));
       }, timeout);
 
       const checkConnect = (): void => {
+        if (settled) return;
         if (this._state === ConnectionState.CONNECTED) {
+          settled = true;
           clearTimeout(timer);
           resolve();
         } else if (this._state === ConnectionState.DISCONNECTED) {
+          settled = true;
           clearTimeout(timer);
+          if (this.tickTimer) {
+            clearInterval(this.tickTimer);
+            this.tickTimer = null;
+          }
           reject(new Error('Connection failed'));
         } else {
           setTimeout(checkConnect, 10);

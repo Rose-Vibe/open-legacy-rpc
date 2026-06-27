@@ -51,6 +51,7 @@ class MasterClient:
                       player_count=0, player_limit=4,
                       password_protected=False, use_nat=False,
                       port=7777, timeout=5.0):
+        """Register a game host with the master server. Returns the assigned row_id."""
         ip_bytes = b'0.0.0.0\x00' + b'\x00' * 8
         cells = [
             {'name': 'NAT', 'type': NUMERIC, 'value': 1.0 if use_nat else 0.0},
@@ -92,6 +93,7 @@ class MasterClient:
         raise TimeoutError("No RowID response")
 
     def request_host_list(self, game_type, timeout=5.0):
+        """Query the master server for available hosts. Returns list of host dicts."""
         payload = encode_query_request(game_type)
         self._client.send_message(payload, Reliability.RELIABLE_ORDERED)
 

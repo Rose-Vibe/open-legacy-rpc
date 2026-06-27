@@ -30,6 +30,7 @@ export class ReliabilityLayer {
   private unackedReliable: Map<number, UnackedEntry> = new Map();
   private outgoingQueue: Frame[] = [];
   private seenReliable: Set<number> = new Set();
+  private seenReliableMin = 0;
   private readonly remoteAddress: AddressInfo;
   private readonly connectTime: number;
 
@@ -69,7 +70,8 @@ export class ReliabilityLayer {
     }
 
     for (const frame of this.outgoingQueue) {
-      const seq = this.sendSeq++;
+      const seq = this.sendSeq;
+      this.sendSeq = (this.sendSeq + 1) & 0xffffff;
       const packet = buildDataPacket(seq, [frame], this.getTimestamp());
       packets.push(packet);
 
@@ -127,7 +129,8 @@ export class ReliabilityLayer {
       const entry = this.unackedReliable.get(oldSeq);
       if (!entry) continue;
       if (now - entry.sendTime > timeoutMs) {
-        const newSeq = this.sendSeq++;
+        const newSeq = this.sendSeq;
+        this.sendSeq = (this.sendSeq + 1) & 0xffffff;
         this.unackedReliable.delete(oldSeq);
         this.unackedReliable.set(newSeq, {
           frame: entry.frame,
@@ -148,7 +151,8 @@ export class ReliabilityLayer {
       const entry = this.unackedReliable.get(oldSeq);
       if (!entry) continue;
       if (now - entry.sendTime > timeoutMs) {
-        const newSeq = this.sendSeq++;
+        const newSeq = this.sendSeq;
+        this.sendSeq = (this.sendSeq + 1) & 0xffffff;
         const packet = buildDataPacket(newSeq, [entry.frame], this.getTimestamp());
         this.unackedReliable.delete(oldSeq);
         this.unackedReliable.set(newSeq, {
@@ -174,10 +178,16 @@ export class ReliabilityLayer {
     const messages: IncomingMessage[] = [];
     for (const frame of frames) {
       if (isReliable(frame.reliability) && frame.reliableMsgNumber !== null) {
-        if (this.seenReliable.has(frame.reliableMsgNumber)) {
+        if (
+          frame.reliableMsgNumber < this.seenReliableMin ||
+          this.seenReliable.has(frame.reliableMsgNumber)
+        ) {
           continue;
         }
         this.seenReliable.add(frame.reliableMsgNumber);
+        if (this.seenReliable.size > 10_000) {
+          this.pruneSeenReliable();
+        }
       }
 
       let resolved: Frame | null = null;
@@ -208,6 +218,10 @@ export class ReliabilityLayer {
 
     let state = this.splitAssembler.get(id);
     if (!state) {
+      if (this.splitAssembler.size >= 64) {
+        const oldestId = this.splitAssembler.keys().next().value;
+        if (oldestId !== undefined) this.splitAssembler.delete(oldestId);
+      }
       state = {
         count,
         fragments: new Map(),
@@ -285,6 +299,10 @@ export class ReliabilityLayer {
         this.orderingQueues.set(ch, queue);
       }
       queue.set(idx, frame);
+      if (queue.size > 512) {
+        const oldest = Math.min(...queue.keys());
+        queue.delete(oldest);
+      }
     }
 
     return [];
@@ -298,6 +316,19 @@ export class ReliabilityLayer {
       bitLength: frame.bitLength,
       senderAddress: this.remoteAddress,
     };
+  }
+
+  private pruneSeenReliable(): void {
+    let newMin = this.seenReliableMin;
+    const sorted = [...this.seenReliable].sort((a, b) => a - b);
+    const pruneCount = Math.floor(sorted.length / 2);
+    for (let i = 0; i < pruneCount; i++) {
+      this.seenReliable.delete(sorted[i] as number);
+    }
+    if (pruneCount > 0) {
+      newMin = (sorted[pruneCount - 1] as number) + 1;
+    }
+    this.seenReliableMin = newMin;
   }
 
   get nextSplitId(): number {

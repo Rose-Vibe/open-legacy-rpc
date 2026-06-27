@@ -26,20 +26,11 @@ tshark -i veth-unet-h -f 'udp' -w /tmp/unity.pcap   # capture from host
 sudo bash netns-teardown.sh                        # clean up
 ```
 
-## Current Objective
+## Status
 
-Work through the entire experiment matrix, decode all Unity legacy networking
-framing, produce a full reference spec (`docs/research/`), and build a
-complete Python reference implementation (`protocol/`) of both client and
-server. The end state is a Python client that can connect to a Unity server
-and a Python server that a Unity client can connect to. Only stop for issues
-requiring the user's discretion.
-
-## Architecture
-
-See `docs/architecture/` for design docs.
-See `docs/roadmap/` for the broad roadmap.
-See `docs/plans/` for active sprint plans.
+The wire format is fully decoded and documented in `docs/research/`. Both
+Python (reference) and TypeScript (production) implementations are complete
+with client and server. See `docs/plans/` for active sprint plans.
 
 ## Development Workflow
 
@@ -122,5 +113,4 @@ Workflows require explicit opt-in — say "use a workflow" or "ultracode" when r
 
 - Research findings go in `docs/research/` with date-prefixed filenames
 - Plans in `docs/plans/`; completed plans move to `docs/plans/archive/`
-- ADRs in `docs/adr/`, numbered sequentially
 - Notes and informal findings in `docs/notes/`

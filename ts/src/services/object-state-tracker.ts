@@ -75,6 +75,7 @@ export class ObjectStateTracker {
     }
   }
 
+  /** Update field values. Returns per-field dirty flags. */
   update(values: Record<string, FieldValue>): boolean[] {
     const flags: boolean[] = [];
     for (const f of this.fields) {

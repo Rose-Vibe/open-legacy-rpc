@@ -9,6 +9,7 @@ export function viewIdToInt(vid: ViewId): number {
   return vid.scope === 'scene' ? vid.id : 0x100000000 + vid.id;
 }
 
+/** Encode a NetworkViewID as 48-bit big-endian bytes. */
 export function encodeViewId(viewId: number): Uint8Array {
   const hi = Math.floor(viewId / 0x100000000) & 0xffff;
   const lo = viewId & 0xffffffff;

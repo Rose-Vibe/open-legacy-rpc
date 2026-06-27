@@ -186,3 +186,18 @@ def test_client_allocate_before_connected():
     """allocate_view_id before connection returns 0 (unassigned)."""
     client = UnityClient()
     assert client.allocate_view_id() == 0
+
+
+def test_server_viewid_allocation_overflow():
+    """Server raises ValueError when ViewID allocation exceeds stride."""
+    import pytest
+    server, client, addr, _, _ = _make_server_client(17801, viewid_stride=3)
+    try:
+        server.allocate_view_id(addr)
+        server.allocate_view_id(addr)
+        server.allocate_view_id(addr)
+        with pytest.raises(ValueError, match="overflow"):
+            server.allocate_view_id(addr)
+    finally:
+        client.disconnect()
+        server.stop()

@@ -252,6 +252,7 @@ export function decodeString(bits: string): Uint8Array {
   return new Uint8Array(result);
 }
 
+/** Encode a string for RakNet wire format with byte-alignment padding. */
 export function encodeStringForWire(s: string): string {
   let bits = encodeString(s);
   const remainder = bits.length % 8;

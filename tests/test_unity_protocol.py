@@ -582,6 +582,41 @@ def test_float_edge_cross_language_bytes():
             f"value={val}: expected {expected_hex}, got {actual}"
 
 
+def test_bytes_param_size_limit():
+    """Decoding a bytes param with count > MAX_BYTES_PARAM_SIZE raises ValueError."""
+    from protocol.unity_protocol import MAX_BYTES_PARAM_SIZE
+    # Build a minimal RPC payload with a bytes param whose count exceeds the limit
+    # Use encode_rpc_subsequent for RPC_Bytes, then tamper with the count field
+    payload, bits = encode_rpc_subsequent('RPC_Bytes', [b'\x00'], 1, 0, RPCMode.Server)
+    result = decode_rpc(payload, bits)
+    assert result['method_name'] == 'RPC_Bytes'
+    assert result['params'][0] == b'\x00'
+
+    # Now build a payload with an absurd count
+    bs = BitStream(payload, bits)
+    # Find where the bytes count is and replace it with a huge value
+    # Easier: construct a minimal bitstream manually
+    payload2, bits2 = encode_rpc_subsequent('RPC_Bytes', [b''], 1, 0, RPCMode.Server)
+    # Replace the 4-byte count (value 0) with MAX_BYTES_PARAM_SIZE + 1
+    import pytest
+    bs2 = BitStream(payload2, bits2)
+    # Navigate to the param area: for subsequent RPC_Bytes, params start after mode bits
+    # The count is at a specific bit offset - just test by encoding a huge payload
+    # Instead, test through decode_rpc by crafting raw bytes
+    big_count = MAX_BYTES_PARAM_SIZE + 1
+    # Encode an RPC with 0-length bytes, then find and replace the count
+    data = bytearray(payload2)
+    # The count is the last 4 bytes of meaningful data before end (big-endian u32)
+    # For an empty bytes param, the count=0 is encoded as 4 zero bytes right before the end
+    # Easier approach: just use _decode_params directly
+    from protocol.unity_protocol import _decode_params
+    count_bs = BitStream()
+    count_bs.write_u32_be(big_count)
+    count_bs.pos = 0
+    with pytest.raises(ValueError, match="bytes param too large"):
+        _decode_params(count_bs, ['bytes'])
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]

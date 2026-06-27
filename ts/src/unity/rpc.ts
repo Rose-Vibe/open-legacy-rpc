@@ -36,6 +36,7 @@ export const RPC_MODE_FROM_NAME: Record<string, RpcMode> = {
 };
 
 const MSG_ID_RPC = 0x1b;
+const MAX_BYTES_PARAM_SIZE = 1_048_576;
 const INTERNAL_RPC_CONSTANT = 0x0000;
 const USER_RPC_CONSTANT = 0x0002;
 
@@ -119,6 +120,7 @@ export interface RpcEncodeOptions {
   mode: RpcMode;
 }
 
+/** Encode a subsequent-use RPC (method already registered on receiver). */
 export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   data: Uint8Array;
   bitLength: number;
@@ -159,6 +161,7 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   return { data: bs.toBytes(), bitLength: totalBits };
 }
 
+/** Encode a first-use RPC (includes method name hash for registration). */
 export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   data: Uint8Array;
   bitLength: number;
@@ -218,6 +221,7 @@ export interface DecodedRpc {
   methodHash?: string;
 }
 
+/** Decode a Unity RPC message from raw payload bytes. */
 export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const bs = new BitStream(payload, bitLength);
 
@@ -280,6 +284,7 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   return result;
 }
 
+/** Check if a 0x1b message is an RPC (byte 9 === 0x0b) vs state sync. */
 export function isRpc(payload: Uint8Array): boolean {
   return payload.length >= 10 && payload[9] === 0x0b;
 }
@@ -299,6 +304,9 @@ function decodeParams(bs: BitStream, sig: ParamType[]): unknown[] {
       params.push([bs.readFloatBE(), bs.readFloatBE(), bs.readFloatBE(), bs.readFloatBE()]);
     } else if (ptype === 'bytes') {
       const count = bs.readU32BE();
+      if (count > MAX_BYTES_PARAM_SIZE) {
+        throw new Error(`bytes param too large: ${count} > ${MAX_BYTES_PARAM_SIZE}`);
+      }
       params.push(bs.readBytes(count));
     } else if (ptype === 'NetworkViewID') {
       params.push(bs.readBits(16));

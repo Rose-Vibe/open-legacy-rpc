@@ -18,6 +18,7 @@ class RPCMode(IntEnum):
 
 
 MSG_ID_RPC = 0x1B
+MAX_BYTES_PARAM_SIZE = 1_048_576
 
 
 def register_method_names(names):
@@ -428,6 +429,8 @@ def _decode_params(bs, sig):
             params.append(bs.read_quaternion())
         elif ptype == 'bytes':
             count = bs.read_u32_be()
+            if count > MAX_BYTES_PARAM_SIZE:
+                raise ValueError(f"bytes param too large: {count} > {MAX_BYTES_PARAM_SIZE}")
             params.append(bs.read_bytes(count))
         elif ptype == 'NetworkViewID':
             params.append(bs.read_bits(16))

@@ -1,5 +1,6 @@
 import { getCodes } from '../huffman.js';
 
+/** Compute first-use method identifier: 2 zero bits + Huffman(name). Returns classGuid + methodHash. */
 export function computeMethodId(methodName: string): {
   classGuid: Uint8Array;
   methodHash: Uint8Array;
@@ -77,6 +78,7 @@ export function registerMethodNames(names: string[]): void {
   }
 }
 
+/** Compute 7-bit method index from .NET metadata RID. */
 export function computeMethodIndex(methodRid: number, interfaceMethodCount: number): number {
   return (methodRid - 1 - interfaceMethodCount) * 4;
 }

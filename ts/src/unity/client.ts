@@ -93,6 +93,7 @@ export class UnityClient {
     this.rpcHandlers.set(methodName, handler);
   }
 
+  /** Register a typed RPC handler. RPCs failing Zod validation are silently dropped. */
   onTypedRpc<T>(
     def: RpcDefinition<T>,
     handler: (args: T) => void,
@@ -117,6 +118,7 @@ export class UnityClient {
     this.sendRpc(def.name, params, { viewId, mode });
   }
 
+  /** Register a state sync handler. Pass viewId=null for a catch-all handler. */
   onStateSync(viewId: number | null, handler: EventHandler<[StateSyncMessage]>): void {
     this.stateSyncHandlers.set(viewId, handler);
   }

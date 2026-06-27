@@ -94,7 +94,7 @@ class RakNetClient:
             self.peer.send_message(payload, reliability, ordering_channel)
 
     def poll(self, timeout=0.0):
-        """Poll for incoming messages. Returns list of (msg_id, payload, reliability) tuples."""
+        """Poll for incoming messages. Returns list of (msg_id, payload, reliability, bit_length) tuples."""
         messages = self._queued_messages
         self._queued_messages = []
         messages.extend(self._poll(timeout))
@@ -293,7 +293,7 @@ class RakNetServer:
                 peer.send_message(payload, reliability, ordering_channel)
 
     def poll(self, timeout=0.0):
-        """Poll for incoming messages. Returns list of (addr, msg_id, payload, reliability)."""
+        """Poll for incoming messages. Returns list of (addr, msg_id, payload, reliability, bit_length) tuples."""
         messages = []
         if self.sock is None:
             return messages
@@ -366,6 +366,11 @@ class RakNetServer:
         return False
 
     def _handle_open_connection_request(self, addr, data):
+        if addr not in self.peers and len(self.peers) >= self.max_connections:
+            log.info("Rejected connection from %s: at capacity (%d/%d)",
+                     addr, len(self.peers), self.max_connections)
+            return
+
         # Parse: msg_id(1) + version(1) + guid(8) + OFFLINE_MAGIC(16) + server_addr(6)
         # Extract client guid for cookie echo
         client_guid_upper = data[2:6] if len(data) >= 6 else b'\x00\x00\x00\x00'

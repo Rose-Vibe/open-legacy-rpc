@@ -130,6 +130,67 @@ def test_split_packet_out_of_order():
             assert result is None
 
 
+def test_split_assembler_prunes_stale():
+    """SplitPacketAssembler evicts entries older than MAX_AGE."""
+    import time
+    assembler = SplitPacketAssembler()
+    # Temporarily set a very low max age
+    old_age = SplitPacketAssembler.MAX_AGE
+    SplitPacketAssembler.MAX_AGE = 0.0
+    try:
+        msg = EncapsulatedMessage(b'\x01', Reliability.RELIABLE)
+        msg.split_packet_count = 2
+        msg.split_packet_id = 0
+        msg.split_packet_index = 0
+        assembler.add(msg)
+        assert len(assembler._pending) == 1
+
+        # Adding another split triggers prune of the stale one
+        time.sleep(0.01)
+        msg2 = EncapsulatedMessage(b'\x02', Reliability.RELIABLE)
+        msg2.split_packet_count = 2
+        msg2.split_packet_id = 1
+        msg2.split_packet_index = 0
+        assembler.add(msg2)
+        assert 0 not in assembler._pending
+    finally:
+        SplitPacketAssembler.MAX_AGE = old_age
+
+
+def test_split_assembler_limits_pending():
+    """SplitPacketAssembler evicts oldest when over MAX_PENDING."""
+    assembler = SplitPacketAssembler()
+    old_max = SplitPacketAssembler.MAX_PENDING
+    SplitPacketAssembler.MAX_PENDING = 5
+    try:
+        for i in range(10):
+            msg = EncapsulatedMessage(b'\x01', Reliability.RELIABLE)
+            msg.split_packet_count = 2
+            msg.split_packet_id = i
+            msg.split_packet_index = 0
+            assembler.add(msg)
+        assert len(assembler._pending) <= 5
+    finally:
+        SplitPacketAssembler.MAX_PENDING = old_max
+
+
+def test_sequence_number_wrapping():
+    """RakNetPeer wraps _send_seq at 24 bits."""
+    import socket as sock_mod
+    from protocol.raknet_transport import RakNetPeer
+    s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_DGRAM)
+    s.setblocking(False)
+    s.bind(('127.0.0.1', 0))
+    peer = RakNetPeer(s, ('127.0.0.1', 9999))
+    peer._send_seq = 0xFFFFFE
+    # send_message increments _send_seq
+    peer.send_message(b'\x01', Reliability.UNRELIABLE)
+    assert peer._send_seq == 0xFFFFFF
+    peer.send_message(b'\x02', Reliability.UNRELIABLE)
+    assert peer._send_seq == 0
+    s.close()
+
+
 def test_parse_known_capture_datagram():
     """Parse a known datagram from the ConnectExperiment capture."""
     # A datagram containing 0x83 (Unity player ready)

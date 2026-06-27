@@ -40,6 +40,7 @@ export interface RpcDefinition<T = unknown> {
   readonly _type: T;
 }
 
+/** Define an RPC with typed fields and Zod validation. Registers the method signature for encode/decode. */
 export function defineRpc<F extends RpcFieldDefs>(
   name: string,
   fields: F,

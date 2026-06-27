@@ -97,6 +97,7 @@ export class UnityServer {
     this.rpcHandlers.set(methodName, handler);
   }
 
+  /** Register a typed RPC handler. RPCs failing Zod validation are silently dropped. */
   onTypedRpc<T>(
     def: RpcDefinition<T>,
     handler: (session: ClientSession, args: T) => void,
@@ -109,6 +110,7 @@ export class UnityServer {
     });
   }
 
+  /** Send a typed RPC to a client. Throws if args fail Zod validation. */
   sendTypedRpc<T>(
     target: ClientSession,
     def: RpcDefinition<T>,
@@ -227,10 +229,14 @@ export class UnityServer {
       if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 
+    const sendHex = [...result.data].map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`[UnityServer] SEND to ${session.id}: method="${methodName}" viewId=${String(viewId)} mode=${String(mode)} len=${String(result.data.length)} bits=${String(result.bitLength)} hex=[${sendHex}]`);
     this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED);
   }
 
   private handleMessage(session: ClientSession, msg: IncomingMessage): void {
+    const hexDump = [...msg.payload].map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`[UnityServer] msg from ${session.id}: len=${String(msg.payload.length)} rel=${String(msg.reliability)} bits=${String(msg.bitLength)} hex=[${hexDump}]`);
     if (msg.payload[0] !== 0x1b) return;
 
     if (msg.reliability === Reliability.UNRELIABLE_SEQUENCED) {
@@ -248,9 +254,12 @@ export class UnityServer {
       console.warn('Failed to decode RPC:', e);
       return;
     }
+    console.log(`[UnityServer] RPC decoded: method="${decoded.methodName}" firstUse=${String(decoded.firstUse)} classGuid=${decoded.classGuid ?? 'n/a'} methodHash=${decoded.methodHash ?? 'n/a'} params=${String(decoded.params.length)}`);
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
       handler(session, ...decoded.params);
+    } else {
+      console.log(`[UnityServer] No handler for RPC "${decoded.methodName}"`);
     }
   }
 

@@ -10,6 +10,7 @@ export class BitStreamError extends Error {
   }
 }
 
+/** Bit-level reader/writer for Unity/RakNet wire format. All multi-byte integers use big-endian. */
 export class BitStream {
   private buf: Uint8Array;
   private _bitLength: number;

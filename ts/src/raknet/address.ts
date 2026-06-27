@@ -1,3 +1,4 @@
+/** Encode IPv4 + port in RakNet's bitwise-inverted format. */
 export function encodeAddress(ip: string, port: number): Uint8Array {
   const parts = ip.split('.').map(Number);
   const result = new Uint8Array(6);

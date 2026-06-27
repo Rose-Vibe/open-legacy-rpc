@@ -753,6 +753,42 @@ describe('decodeViewIdBits 48-bit', () => {
   });
 });
 
+describe('bytes param size limit', () => {
+  it('throws when bytes param count exceeds 1MB', () => {
+    // Build an RPC_Bytes with a tiny payload, then tamper with the count
+    const { data, bitLength } = encodeRpcSubsequent({
+      methodName: 'RPC_Bytes',
+      params: [{ type: 'bytes', value: new Uint8Array(0) }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    // The count field is 4 bytes (u32 big-endian) right after the mode bits
+    // Find the 4 zero bytes that represent count=0 and replace with a huge value
+    const tampered = new Uint8Array(data.length + 4);
+    tampered.set(data);
+    // Decode the untampered version to confirm it works
+    expect(() => decodeRpc(data, bitLength)).not.toThrow();
+
+    // Manually construct a BitStream with a huge count in the params area
+    const bs = new BitStream(data, bitLength);
+    // Navigate to where params start for a subsequent RPC_Bytes
+    // Subsequent RPC format: 140 bits + params; params for bytes = u32(count) + data
+    // The count is at bit offset 140
+    const countOffset = 140;
+    const tamperedBs = new BitStream();
+    // Copy bits up to count
+    const srcBs = new BitStream(data, bitLength);
+    for (let i = 0; i < countOffset; i++) {
+      tamperedBs.writeBit(srcBs.readBit());
+    }
+    // Write a huge count
+    tamperedBs.writeU32BE(2_000_000);
+    const tamperedData = tamperedBs.toBytes();
+    expect(() => decodeRpc(tamperedData, tamperedBs.bitLength)).toThrow('bytes param too large');
+  });
+});
+
 describe('decodeQueryReply cellIdx bounds', () => {
   it('throws on cellIdx >= columns.length', () => {
     // Build a reply with 1 column but cellIdx=5

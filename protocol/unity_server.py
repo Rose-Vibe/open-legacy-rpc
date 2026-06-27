@@ -98,6 +98,10 @@ class UnityServer:
             raise ValueError(f"Unknown client: {addr}")
         base = self.get_viewid_base(addr)
         offset = self._view_counters.get(addr, 0)
+        if offset >= self._viewid_stride:
+            raise ValueError(
+                f"ViewID allocation overflow for {addr}: "
+                f"offset {offset} >= stride {self._viewid_stride}")
         view_id = base + offset
         self._view_counters[addr] = offset + 1
         if addr not in self._allocated_views:

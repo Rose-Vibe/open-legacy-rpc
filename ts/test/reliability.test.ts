@@ -173,6 +173,85 @@ describe('ReliabilityLayer', () => {
     });
   });
 
+  describe('sequence number wrapping', () => {
+    it('wraps sendSeq at 24 bits', () => {
+      const rl = makeReliability();
+      // Access internal state to set sendSeq near the boundary
+      (rl as unknown as Record<string, number>).sendSeq = 0xfffffe;
+      rl.queueOutgoing(new Uint8Array([0x01]), Reliability.UNRELIABLE);
+      rl.queueOutgoing(new Uint8Array([0x02]), Reliability.UNRELIABLE);
+      rl.queueOutgoing(new Uint8Array([0x03]), Reliability.UNRELIABLE);
+      const packets = rl.getOutgoingPackets();
+      expect(packets).toHaveLength(3);
+      const seqs = packets.map((p) => {
+        const parsed = parsePacket(p);
+        if (parsed.type !== 'data') throw new Error('expected data');
+        return parsed.sequenceNumber;
+      });
+      expect(seqs[0]).toBe(0xfffffe);
+      expect(seqs[1]).toBe(0xffffff);
+      expect(seqs[2]).toBe(0);
+    });
+  });
+
+  describe('seenReliable bounded', () => {
+    it('prunes seenReliable when it exceeds 10000 entries', () => {
+      const rl = makeReliability();
+      for (let i = 0; i < 15000; i++) {
+        const frame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+        frame.reliableMsgNumber = i;
+        const packet = buildDataPacket(i, [frame]);
+        rl.processIncoming(packet);
+      }
+      const seen = (rl as unknown as Record<string, Set<number>>).seenReliable;
+      expect(seen.size).toBeLessThanOrEqual(10000);
+      // Should still dedup: re-send a recent message
+      const frame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+      frame.reliableMsgNumber = 14999;
+      const packet = buildDataPacket(99999, [frame]);
+      const msgs = rl.processIncoming(packet);
+      expect(msgs).toHaveLength(0);
+    });
+  });
+
+  describe('ordering queue bounded', () => {
+    it('does not grow ordering queue past 512', () => {
+      const rl = makeReliability();
+      // Send 600 out-of-order frames (skip idx 0 so they all queue)
+      for (let i = 1; i <= 600; i++) {
+        const frame = createFrame(new Uint8Array([i & 0xff]), Reliability.RELIABLE_ORDERED);
+        frame.reliableMsgNumber = i;
+        frame.orderingIndex = i;
+        frame.orderingChannel = 0;
+        const packet = buildDataPacket(i, [frame]);
+        rl.processIncoming(packet);
+      }
+      const queues = (rl as unknown as Record<string, Map<number, Map<number, unknown>>>)
+        .orderingQueues;
+      const ch0 = queues.get(0);
+      expect(ch0).toBeDefined();
+      expect(ch0!.size).toBeLessThanOrEqual(512);
+    });
+  });
+
+  describe('splitAssembler bounded', () => {
+    it('evicts oldest split when over 64 pending', () => {
+      const rl = makeReliability();
+      // Create 70 incomplete splits (only send fragment 0 of 2)
+      for (let sid = 0; sid < 70; sid++) {
+        const frame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+        frame.reliableMsgNumber = sid;
+        frame.splitPacketCount = 2;
+        frame.splitPacketId = sid;
+        frame.splitPacketIndex = 0;
+        const packet = buildDataPacket(sid, [frame]);
+        rl.processIncoming(packet);
+      }
+      const assembler = (rl as unknown as Record<string, Map<number, unknown>>).splitAssembler;
+      expect(assembler.size).toBeLessThanOrEqual(64);
+    });
+  });
+
   describe('ACK processing', () => {
     it('removes acked entries from unacked reliable', () => {
       const rl = makeReliability();
