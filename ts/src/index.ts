@@ -74,3 +74,10 @@ export {
 export type { Serializer, FieldSchema } from './services/serialization.js';
 export { ServerCluster } from './services/server-cluster.js';
 export type { ClusterClient } from './services/server-cluster.js';
+export { defineRpc, argsToRpcParams, rpcParamsToArgs } from './services/rpc-schema.js';
+export type { RpcDefinition } from './services/rpc-schema.js';
+export { NetworkGroups } from './services/network-groups.js';
+export { MasterServer } from './master/server.js';
+export type { MasterServerOptions } from './master/server.js';
+export { MasterClient } from './master/client.js';
+export type { HostInfo, RegisterOptions } from './master/client.js';

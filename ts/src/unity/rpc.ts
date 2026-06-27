@@ -103,6 +103,14 @@ function registerLoaderAssembly(): void {
 
 registerLoaderAssembly();
 
+export function getBuiltinMethodNames(): string[] {
+  return [...METHOD_INDEX_MAP.keys()];
+}
+
+export function hasMethodIndex(methodName: string): boolean {
+  return METHOD_INDEX_MAP.has(methodName);
+}
+
 export interface RpcEncodeOptions {
   methodName: string;
   params: RpcParam[];

@@ -7,10 +7,13 @@ import {
   encodeRpcFirstUse,
   decodeRpc,
   isRpc,
-  METHOD_SIGNATURES,
+  getBuiltinMethodNames,
+  hasMethodIndex,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
+import type { RpcDefinition } from '../services/rpc-schema.js';
+import { argsToRpcParams, rpcParamsToArgs } from '../services/rpc-schema.js';
 import { decodeStateSync } from './state-sync.js';
 import type { DecodedStateSync } from './state-sync.js';
 
@@ -32,7 +35,7 @@ export class UnityClient {
   private stateSyncHandlers = new Map<number | null, EventHandler<[StateSyncMessage]>>();
   private connectHandlers: Array<EventHandler<[]>> = [];
   private disconnectHandlers: Array<EventHandler<[string]>> = [];
-  private rpcSentMethods = new Set<string>(Object.keys(METHOD_SIGNATURES));
+  private rpcSentMethods = new Set<string>(getBuiltinMethodNames());
   private rpcCounter = 0;
 
   constructor(socket: UdpSocket) {
@@ -90,6 +93,30 @@ export class UnityClient {
     this.rpcHandlers.set(methodName, handler);
   }
 
+  onTypedRpc<T>(
+    def: RpcDefinition<T>,
+    handler: (args: T) => void,
+  ): void {
+    this.rpcHandlers.set(def.name, (...params: unknown[]) => {
+      const args = rpcParamsToArgs(def, params);
+      const result = def.zodSchema.safeParse(args);
+      if (!result.success) return;
+      handler(result.data);
+    });
+  }
+
+  sendTypedRpc<T>(
+    def: RpcDefinition<T>,
+    args: T,
+    options?: { viewId?: number; mode?: RpcMode },
+  ): void {
+    def.zodSchema.parse(args);
+    const viewId = options?.viewId ?? 1;
+    const mode = options?.mode ?? RpcMode.Server;
+    const params = argsToRpcParams(def, args);
+    this.sendRpc(def.name, params, { viewId, mode });
+  }
+
   onStateSync(viewId: number | null, handler: EventHandler<[StateSyncMessage]>): void {
     this.stateSyncHandlers.set(viewId, handler);
   }
@@ -104,11 +131,11 @@ export class UnityClient {
     const counter = this.rpcCounter++;
 
     let result: { data: Uint8Array; bitLength: number };
-    if (this.rpcSentMethods.has(methodName)) {
+    if (this.rpcSentMethods.has(methodName) && hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode });
     } else {
       result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode });
-      this.rpcSentMethods.add(methodName);
+      if (hasMethodIndex(methodName)) this.rpcSentMethods.add(methodName);
     }
 
     this.raknet.send(result.data, Reliability.RELIABLE_ORDERED);

@@ -8,10 +8,13 @@ import {
   encodeRpcFirstUse,
   decodeRpc,
   isRpc,
-  METHOD_SIGNATURES,
+  getBuiltinMethodNames,
+  hasMethodIndex,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
+import type { RpcDefinition } from '../services/rpc-schema.js';
+import { argsToRpcParams, rpcParamsToArgs } from '../services/rpc-schema.js';
 import { encodeStateSync, decodeStateSync, encodeDeltaStateSync } from './state-sync.js';
 import type { StateSyncField, DecodedStateSync } from './state-sync.js';
 import type { ViewId } from './view-id.js';
@@ -49,7 +52,7 @@ export class UnityServer {
     this.raknet = new RakNetServer(socket, rakOpts);
 
     this.raknet.onConnect((session) => {
-      this.rpcSentMethods.set(session.id, new Set(Object.keys(METHOD_SIGNATURES)));
+      this.rpcSentMethods.set(session.id, new Set(getBuiltinMethodNames()));
       this.rpcCounters.set(session.id, 0);
       for (const h of this.connectHandlers) h(session);
     });
@@ -92,6 +95,39 @@ export class UnityServer {
 
   onRpc(methodName: string, handler: EventHandler<[ClientSession, ...unknown[]]>): void {
     this.rpcHandlers.set(methodName, handler);
+  }
+
+  onTypedRpc<T>(
+    def: RpcDefinition<T>,
+    handler: (session: ClientSession, args: T) => void,
+  ): void {
+    this.rpcHandlers.set(def.name, (session: ClientSession, ...params: unknown[]) => {
+      const args = rpcParamsToArgs(def, params);
+      const result = def.zodSchema.safeParse(args);
+      if (!result.success) return;
+      handler(session, result.data);
+    });
+  }
+
+  sendTypedRpc<T>(
+    target: ClientSession,
+    def: RpcDefinition<T>,
+    args: T,
+    options?: { viewId?: number; mode?: RpcMode },
+  ): void {
+    def.zodSchema.parse(args);
+    const params = argsToRpcParams(def, args);
+    this.sendRpc(target, def.name, params, options);
+  }
+
+  broadcastTypedRpc<T>(
+    def: RpcDefinition<T>,
+    args: T,
+    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode },
+  ): void {
+    def.zodSchema.parse(args);
+    const params = argsToRpcParams(def, args);
+    this.broadcastRpc(def.name, params, options);
   }
 
   onStateSync(handler: EventHandler<[ClientSession, StateSyncMessage]>): void {
@@ -176,7 +212,7 @@ export class UnityServer {
   ): void {
     let sent = this.rpcSentMethods.get(session.id);
     if (!sent) {
-      sent = new Set(Object.keys(METHOD_SIGNATURES));
+      sent = new Set(getBuiltinMethodNames());
       this.rpcSentMethods.set(session.id, sent);
     }
 
@@ -184,11 +220,11 @@ export class UnityServer {
     this.rpcCounters.set(session.id, counter + 1);
 
     let result: { data: Uint8Array; bitLength: number };
-    if (sent.has(methodName)) {
+    if (sent.has(methodName) && hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent({ methodName, params, viewId, rpcCounter: counter, mode });
     } else {
       result = encodeRpcFirstUse({ methodName, params, viewId, rpcCounter: counter, mode });
-      sent.add(methodName);
+      if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 
     this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED);
