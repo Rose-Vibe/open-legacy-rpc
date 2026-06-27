@@ -6,14 +6,18 @@ public class PasswordExperiment : IExperiment
     int phase;
     float lastSend;
 
-    const string PASSWORD = "secret123";
+    string password;
 
-    public void Setup(ExperimentContext ctx) { this.ctx = ctx; }
+    public void Setup(ExperimentContext ctx)
+    {
+        this.ctx = ctx;
+        password = ctx.Args.Length > 0 ? ctx.Args[0] : "secret123";
+    }
 
     public void OnServerReady()
     {
-        ctx.Log("Server ready, setting password: " + PASSWORD);
-        Network.incomingPassword = PASSWORD;
+        ctx.Log("Server ready, setting password: " + password);
+        Network.incomingPassword = password;
     }
 
     public void OnPlayerConnected(NetworkPlayer player)

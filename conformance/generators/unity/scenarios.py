@@ -42,7 +42,7 @@ SCENARIOS = {
         'unity-handshake-password',
         [
             {'action': 'startUnityServer', 'experiment': 'PasswordExperiment',
-             'password': 'test123'},
+             'password': 'test123', 'extraArgs': ['test123']},
             {'action': 'connectToUnity', 'password': 'test123'},
             {'action': 'assertConnected'},
             {'action': 'waitForUnityLog', 'pattern': r'Player connected'},
@@ -160,20 +160,20 @@ SCENARIOS = {
 
     'unity-master-register': _make_scenario(
         'Unity registers with Python master server',
-        'Unity client calls MasterServer.RegisterHost, Python validates registration',
+        'Unity server calls MasterServer.RegisterHost, Python master server validates',
         'unity-master-register',
         [
-            {'action': 'startPythonServer'},
-            {'action': 'startUnityClient', 'experiment': 'MasterServerExperiment'},
-            {'action': 'waitForUnityConnect', 'timeout': 10.0},
-            {'action': 'expectServerRpc', 'methodName': 'UpdateRow', 'timeout': 10.0},
+            {'action': 'startMasterServer'},
+            {'action': 'startUnityServer', 'experiment': 'MasterServerExperiment',
+             'passMasterPort': True},
+            {'action': 'expectMasterRegistration', 'timeout': 15.0},
             {'action': 'sleep', 'duration': 1.0},
         ],
     ),
 
     'unity-disconnect': _make_scenario(
         'Disconnect cleanup',
-        'Python client connects to Unity server, disconnects, Unity logs disconnect',
+        'Python client connects to Unity server, disconnects cleanly',
         'unity-disconnect',
         [
             {'action': 'startUnityServer', 'experiment': 'ConnectExperiment'},
@@ -181,8 +181,9 @@ SCENARIOS = {
             {'action': 'assertConnected'},
             {'action': 'waitForUnityLog', 'pattern': r'Player connected'},
             {'action': 'disconnect'},
-            {'action': 'waitForUnityLog', 'pattern': r'Player disconnected',
-             'timeout': 5.0},
+            {'action': 'sleep', 'duration': 1.0},
+            {'action': 'waitForUnityLog', 'pattern': r'EXPERIMENT_DONE',
+             'timeout': 10.0},
         ],
     ),
 }

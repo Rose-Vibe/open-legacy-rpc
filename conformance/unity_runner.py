@@ -19,6 +19,7 @@ from protocol.unity_client import UnityClient
 from protocol.unity_server import UnityServer
 from protocol.unity_protocol import RPCMode
 from protocol.bitstream import BitStream
+from protocol.master_server import MasterServer
 
 log = logging.getLogger(__name__)
 
@@ -143,9 +144,12 @@ class UnityTestRunner:
         self.failures = []
         self.unity = None
         self.server = None
+        self.master = None
         self.client = None
         self.server_thread = None
+        self.master_thread = None
         self.port = _next_port()
+        self.master_port = _next_port()
         self._server_connected = []
         self._server_rpcs = {}
         self._client_rpcs = {}
@@ -190,8 +194,15 @@ class UnityTestRunner:
                 self.server.stop()
             except Exception:
                 pass
+        if self.master:
+            try:
+                self.master.stop()
+            except Exception:
+                pass
         if self.server_thread and self.server_thread.is_alive():
             self.server_thread.join(timeout=2.0)
+        if self.master_thread and self.master_thread.is_alive():
+            self.master_thread.join(timeout=2.0)
         if self.unity:
             self.unity.stop()
 
@@ -205,12 +216,15 @@ class UnityTestRunner:
 
     def _action_startUnityServer(self, step):
         experiment = step['experiment']
-        password_args = []
+        extra_args = []
         if step.get('password'):
-            password_args = ['--password', step['password']]
+            extra_args.extend(['--password', step['password']])
+        if step.get('passMasterPort'):
+            extra_args.append(str(self.master_port))
+        extra_args.extend(step.get('extraArgs', []))
         self.unity = UnityProcess(
             self.unity_path, experiment, 'server',
-            port=self.port, extra_args=password_args)
+            port=self.port, extra_args=extra_args)
         self.unity.start()
         log_line = self.unity.wait_for_log(r'Server ready|Server initialized|Listening',
                                            timeout=self.timeout)
@@ -326,6 +340,34 @@ class UnityTestRunner:
         if self.client and self.client.connected:
             self.client.disconnect()
             time.sleep(0.3)
+
+    def _action_startMasterServer(self, step):
+        self.master = MasterServer(port=self.master_port)
+        self.master.start()
+        self._master_registrations = []
+
+        def _run_master(timeout):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                self.master.tick(timeout=0.1)
+                for table in self.master._tables.values():
+                    for row_id, row in table.rows.items():
+                        entry = {'row_id': row_id, 'data': dict(row)}
+                        if entry not in self._master_registrations:
+                            self._master_registrations.append(entry)
+
+        self.master_thread = threading.Thread(
+            target=_run_master, args=(self.timeout + 10,), daemon=True)
+        self.master_thread.start()
+        time.sleep(0.1)
+
+    def _action_expectMasterRegistration(self, step):
+        timeout = step.get('timeout', self.timeout)
+        deadline = time.monotonic() + timeout
+        while not self._master_registrations and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if not self._master_registrations:
+            self.failures.append("Unity did not register with master server")
 
     def _action_sleep(self, step):
         time.sleep(step.get('duration', 0.5))

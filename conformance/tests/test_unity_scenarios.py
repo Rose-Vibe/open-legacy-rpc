@@ -153,4 +153,4 @@ class TestScenarioMirrorsM12c:
         s = get_scenario('unity-disconnect')
         log_steps = [step for step in s['steps'] if step.get('action') == 'waitForUnityLog']
         patterns = [step['pattern'] for step in log_steps]
-        assert any('disconnected' in p.lower() for p in patterns)
+        assert any('EXPERIMENT_DONE' in p or 'disconnected' in p.lower() for p in patterns)

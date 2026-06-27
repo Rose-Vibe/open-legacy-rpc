@@ -185,6 +185,7 @@ function findUnityBinary(customPath?: string): string | null {
 
 class UnityTestRunner {
   private failures: string[] = [];
+  private skipped = false;
   private unity: UnityProcess | null = null;
   private server: UnityServer | null = null;
   private serverSocket: UdpSocket | null = null;
@@ -195,6 +196,7 @@ class UnityTestRunner {
   private serverConnected: Array<{ session: ClientSession; index: number }> = [];
   private serverRpcs: Map<string, unknown[][]> = new Map();
   private clientRpcs: Map<string, unknown[][]> = new Map();
+  private masterPort: number;
 
   constructor(
     private scenario: Scenario,
@@ -203,6 +205,7 @@ class UnityTestRunner {
   ) {
     this.unityPath = findUnityBinary(unityPath);
     this.port = nextPort();
+    this.masterPort = nextPort();
   }
 
   async run(): Promise<TestResult> {
@@ -228,13 +231,12 @@ class UnityTestRunner {
       await this.cleanup();
     }
 
-    return {
-      testInfo: this.scenario.testInfo,
-      validation: {
-        pass: this.failures.length === 0,
-        failures: this.failures,
-      },
+    const validation: TestResult['validation'] = {
+      pass: this.failures.length === 0,
+      failures: this.failures,
     };
+    if (this.skipped) validation.skipped = true;
+    return { testInfo: this.scenario.testInfo, validation };
   }
 
   private async cleanup(): Promise<void> {
@@ -303,6 +305,10 @@ class UnityTestRunner {
       if (step.password) {
         extraArgs.push('--password', step.password as string);
       }
+      if (step.passMasterPort) {
+        extraArgs.push(String(this.masterPort));
+      }
+      extraArgs.push(...((step.extraArgs as string[]) ?? []));
       this.unity = new UnityProcess(
         this.unityPath!, experiment, 'server', this.port,
         undefined, extraArgs,
@@ -482,6 +488,15 @@ class UnityTestRunner {
 
       await this.server.start();
       await sleep(50);
+    },
+
+    startMasterServer: (_step: Step): void => {
+      this.skipped = true;
+      this.failures.push('Master server not implemented in TS (M11 is Python-only)');
+    },
+
+    expectMasterRegistration: (_step: Step): void => {
+      // Only reached if startMasterServer didn't fail first
     },
 
     disconnect: async (_step: Step): Promise<void> => {

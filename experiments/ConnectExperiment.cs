@@ -4,6 +4,8 @@ public class ConnectExperiment : IExperiment
 {
     ExperimentContext ctx;
     float readyTime;
+    bool playerConnected;
+    bool playerDisconnected;
     bool done;
 
     public void Setup(ExperimentContext ctx)
@@ -27,18 +29,21 @@ public class ConnectExperiment : IExperiment
     public void OnPlayerConnected(NetworkPlayer player)
     {
         ctx.Log("Player connected: " + player);
+        playerConnected = true;
         readyTime = Time.realtimeSinceStartup;
     }
 
     public void OnPlayerDisconnected(NetworkPlayer player)
     {
         ctx.Log("Player disconnected: " + player);
+        playerDisconnected = true;
+        readyTime = Time.realtimeSinceStartup;
     }
 
     public void Tick()
     {
         if (done) return;
-        if (readyTime > 0 && Time.realtimeSinceStartup - readyTime > 2.0f)
+        if (readyTime > 0 && Time.realtimeSinceStartup - readyTime > 5.0f)
         {
             ctx.Log("EXPERIMENT_DONE");
             done = true;

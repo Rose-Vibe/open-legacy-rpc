@@ -8,13 +8,20 @@ public class MasterServerExperiment : IExperiment
     bool registered;
     bool hostListReceived;
 
-    public void Setup(ExperimentContext ctx) { this.ctx = ctx; }
+    int masterPort = 23466;
+
+    public void Setup(ExperimentContext ctx)
+    {
+        this.ctx = ctx;
+        if (ctx.Args.Length > 0)
+            int.TryParse(ctx.Args[0], out masterPort);
+    }
 
     public void OnServerReady()
     {
-        ctx.Log("Server ready, registering with master server...");
+        ctx.Log("Server ready, registering with master server on port " + masterPort + "...");
         MasterServer.ipAddress = "127.0.0.1";
-        MasterServer.port = 23466;
+        MasterServer.port = masterPort;
         MasterServer.dedicatedServer = true;
         MasterServer.RegisterHost("TestGame", "MyTestServer", "test_comment");
         ctx.Log("RegisterHost called");
@@ -25,9 +32,9 @@ public class MasterServerExperiment : IExperiment
 
     public void OnClientConnected()
     {
-        ctx.Log("Client connected, querying master server...");
+        ctx.Log("Client connected, querying master server on port " + masterPort + "...");
         MasterServer.ipAddress = "127.0.0.1";
-        MasterServer.port = 23466;
+        MasterServer.port = masterPort;
         MasterServer.RequestHostList("TestGame");
         ctx.Log("RequestHostList called");
     }
