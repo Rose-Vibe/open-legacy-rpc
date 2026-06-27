@@ -1,5 +1,5 @@
 import { BitStream } from '../bitstream.js';
-import { encodeStringForWire } from '../huffman.js';
+import { encodeStringForWire, decodeString } from '../huffman.js';
 import { encodeViewId } from './view-id.js';
 import {
   getMethodId,
@@ -204,6 +204,8 @@ export interface DecodedRpc {
   rpcCounter: number;
   rpcMode: string;
   firstUse: boolean;
+  viewId: number;
+  params: unknown[];
   classGuid?: string;
   methodHash?: string;
 }
@@ -212,7 +214,10 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const bs = new BitStream(payload, bitLength);
 
   bs.readU8(); // msg_id
-  bs.readBits(48); // view_id
+  const viewIdHi = bs.readBits(16);
+  const viewIdMid = bs.readBits(16);
+  const viewIdLo = bs.readBits(16);
+  const viewId = viewIdHi * 0x100000000 + viewIdMid * 0x10000 + viewIdLo;
   const counterByte = bs.readU8();
   const rpcCounter = Math.floor(counterByte / 2);
   bs.readBits(16); // rest of invocation metadata
@@ -223,6 +228,8 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
     rpcCounter,
     rpcMode: '',
     firstUse,
+    viewId,
+    params: [],
   };
 
   if (firstUse) {
@@ -253,11 +260,57 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const modeVal = bs.readBits(4);
   result.rpcMode = RPC_MODE_NAMES[modeVal] ?? String(modeVal);
 
+  if (result.rpcMode === 'Player') {
+    bs.readBit();
+  }
+
+  const sig = METHOD_SIGNATURES[result.methodName];
+  if (sig) {
+    result.params = decodeParams(bs, sig);
+  }
+
   return result;
 }
 
 export function isRpc(payload: Uint8Array): boolean {
   return payload.length >= 10 && payload[9] === 0x0b;
+}
+
+function decodeParams(bs: BitStream, sig: ParamType[]): unknown[] {
+  const params: unknown[] = [];
+  for (const ptype of sig) {
+    if (ptype === 'int') {
+      params.push(bs.readI32BE());
+    } else if (ptype === 'float') {
+      params.push(bs.readFloatBE());
+    } else if (ptype === 'string') {
+      params.push(decodeStringParam(bs));
+    } else if (ptype === 'Vector3') {
+      params.push([bs.readFloatBE(), bs.readFloatBE(), bs.readFloatBE()]);
+    } else if (ptype === 'Quaternion') {
+      params.push([bs.readFloatBE(), bs.readFloatBE(), bs.readFloatBE(), bs.readFloatBE()]);
+    } else if (ptype === 'bytes') {
+      const count = bs.readU32BE();
+      params.push(bs.readBytes(count));
+    } else if (ptype === 'NetworkViewID') {
+      params.push(bs.readBits(16));
+    } else {
+      // NetworkPlayer
+      params.push(bs.readI32BE());
+    }
+  }
+  return params;
+}
+
+function decodeStringParam(bs: BitStream): string {
+  const bitCount = bs.readCompressedU32();
+  if (bitCount === 0) return '';
+  let bits = '';
+  for (let i = 0; i < bitCount; i++) {
+    bits += bs.readBit() === 1 ? '1' : '0';
+  }
+  const decoded = decodeString(bits);
+  return new TextDecoder().decode(decoded);
 }
 
 function encodeParams(bs: BitStream, sig: ParamType[], params: RpcParam[]): void {

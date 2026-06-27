@@ -189,10 +189,8 @@ describe('UnityServer', () => {
     f.bitLength = rpc.bitLength;
     socket.triggerMessage(buildDataPacket(3, [f]), CLIENT_ADDR);
 
-    // The RPC handler should fire but decodeRpc doesn't decode params yet,
-    // so we verify the handler was called at minimum
-    // (params will be empty until param decoding is added to decodeRpc)
     expect(received).toHaveLength(1);
+    expect(received[0]?.params).toEqual([99]);
 
     await server.stop();
   });
@@ -457,6 +455,7 @@ describe('UnityClient', () => {
     socket.triggerMessage(buildDataPacket(2, [fc]), { host: '127.0.0.1', port: 7777 });
 
     expect(received).toHaveLength(1);
+    expect(received[0]).toEqual([77]);
 
     client.disconnect();
   });

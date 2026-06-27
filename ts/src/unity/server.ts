@@ -209,7 +209,7 @@ export class UnityServer {
       const decoded = decodeRpc(msg.payload, msg.bitLength);
       const handler = this.rpcHandlers.get(decoded.methodName);
       if (handler) {
-        handler(session);
+        handler(session, ...decoded.params);
       }
     } catch {
       // Silently drop malformed RPCs

@@ -99,6 +99,8 @@ describe('RPC Encode/Decode', () => {
     expect(decoded.rpcCounter).toBe(0);
     expect(decoded.rpcMode).toBe('Server');
     expect(decoded.firstUse).toBe(false);
+    expect(decoded.viewId).toBe(1);
+    expect(decoded.params).toEqual([42]);
   });
 
   it('encodes and decodes a first-use RPC', () => {
@@ -116,6 +118,8 @@ describe('RPC Encode/Decode', () => {
     expect(decoded.methodName).toBe('RPC_Float');
     expect(decoded.rpcMode).toBe('All');
     expect(decoded.firstUse).toBe(true);
+    expect(decoded.viewId).toBe(1);
+    expect(decoded.params[0]).toBeCloseTo(3.14, 5);
   });
 
   it('isRpc returns true for RPC packets', () => {
@@ -139,6 +143,225 @@ describe('RPC Encode/Decode', () => {
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.rpcCounter).toBe(5);
+  });
+
+  it('round-trips int param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: -42 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual([-42]);
+  });
+
+  it('round-trips float param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Float',
+      params: [{ type: 'float', value: -1.5 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params[0]).toBeCloseTo(-1.5);
+  });
+
+  it('round-trips string param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_String',
+      params: [{ type: 'string', value: 'hello world' }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual(['hello world']);
+  });
+
+  it('round-trips empty string param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_String',
+      params: [{ type: 'string', value: '' }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual(['']);
+  });
+
+  it('round-trips Vector3 param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Vector3',
+      params: [{ type: 'Vector3', value: [1.5, -2.5, 3.0] }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    const v = decoded.params[0] as number[];
+    expect(v[0]).toBeCloseTo(1.5);
+    expect(v[1]).toBeCloseTo(-2.5);
+    expect(v[2]).toBeCloseTo(3.0);
+  });
+
+  it('round-trips Quaternion param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Quaternion',
+      params: [{ type: 'Quaternion', value: [0.1, 0.2, 0.3, 0.9] }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    const q = decoded.params[0] as number[];
+    expect(q[0]).toBeCloseTo(0.1, 5);
+    expect(q[1]).toBeCloseTo(0.2, 5);
+    expect(q[2]).toBeCloseTo(0.3, 5);
+    expect(q[3]).toBeCloseTo(0.9, 5);
+  });
+
+  it('round-trips bytes param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Bytes',
+      params: [{ type: 'bytes', value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]) }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params[0]).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  });
+
+  it('round-trips empty bytes param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Bytes',
+      params: [{ type: 'bytes', value: new Uint8Array(0) }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params[0]).toEqual(new Uint8Array(0));
+  });
+
+  it('round-trips NetworkViewID param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_NetworkViewID',
+      params: [{ type: 'NetworkViewID', value: 42 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual([42]);
+  });
+
+  it('round-trips NetworkPlayer param', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_NetworkPlayer',
+      params: [{ type: 'NetworkPlayer', value: 7 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual([7]);
+  });
+
+  it('round-trips multi-param RPC (int, float, string)', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_IntFloatString',
+      params: [
+        { type: 'int', value: 100 },
+        { type: 'float', value: 2.5 },
+        { type: 'string', value: 'test' },
+      ],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params[0]).toBe(100);
+    expect(decoded.params[1]).toBeCloseTo(2.5);
+    expect(decoded.params[2]).toBe('test');
+  });
+
+  it('round-trips void RPC (no params)', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Void',
+      params: [],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.params).toEqual([]);
+  });
+
+  it('first-use param decoding works', () => {
+    const encoded = encodeRpcFirstUse({
+      methodName: 'RPC_IntFloatString',
+      params: [
+        { type: 'int', value: -1 },
+        { type: 'float', value: 0.5 },
+        { type: 'string', value: 'abc' },
+      ],
+      viewId: 5,
+      rpcCounter: 0,
+      mode: RpcMode.All,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.methodName).toBe('RPC_IntFloatString');
+    expect(decoded.firstUse).toBe(true);
+    expect(decoded.viewId).toBe(5);
+    expect(decoded.params[0]).toBe(-1);
+    expect(decoded.params[1]).toBeCloseTo(0.5);
+    expect(decoded.params[2]).toBe('abc');
+  });
+
+  it('Player mode skips target bit before params', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Int',
+      params: [{ type: 'int', value: 99 }],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Player,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.rpcMode).toBe('Player');
+    expect(decoded.params).toEqual([99]);
+  });
+
+  it('captures viewId from header', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Void',
+      params: [],
+      viewId: 12345,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.viewId).toBe(12345);
+  });
+
+  it('unknown method returns empty params without throwing', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Void',
+      params: [],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+    });
+    // Corrupt the method index byte (byte 10, which contains the 1-bit first_use flag + 7-bit index)
+    // Set to a method index that doesn't exist (0xfe = index 0xfe)
+    encoded.data[10] = 0x7f; // first_use=0, index bits = 0xfe
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.methodName).toMatch(/^unknown_0x/);
+    expect(decoded.params).toEqual([]);
   });
 });
 
