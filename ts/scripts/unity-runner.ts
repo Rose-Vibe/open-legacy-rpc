@@ -271,6 +271,21 @@ class UnityTestRunner {
     }
   }
 
+  private preRegisterClientHandlers(client: UnityClient): void {
+    for (const s of this.scenario.steps) {
+      if (s.action === 'expectRpc') {
+        const method = s.methodName as string;
+        if (!this.clientRpcs.has(method)) {
+          this.clientRpcs.set(method, []);
+          const q = this.clientRpcs.get(method)!;
+          client.onRpc(method, (...args) => {
+            q.push(args);
+          });
+        }
+      }
+    }
+  }
+
   private async executeStep(step: Step): Promise<void> {
     const action = step.action;
     const handler = this.handlers[action];
@@ -313,6 +328,7 @@ class UnityTestRunner {
       const password = (step.password as string) ?? '';
       this.clientSocket = new UdpSocket();
       this.client = new UnityClient(this.clientSocket);
+      this.preRegisterClientHandlers(this.client);
       try {
         const opts: { password?: string; timeout?: number } = {
           timeout: this.timeout,
