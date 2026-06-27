@@ -536,6 +536,15 @@ export class RakNetClient {
     ready[0] = 0x83;
     writeU32BE(ready, 1, 1);
     this.reliability.queueOutgoing(ready, Reliability.RELIABLE_ORDERED);
+
+    // Transition to CONNECTED now. Unity game servers send 0x81 (player
+    // assignment) in response to 0x83 and we update playerIndex/viewIdBase
+    // from it, but non-Unity RakNet servers (e.g. the master server) never
+    // send 0x81. The connection is usable after 0x83 either way.
+    this._state = ConnectionState.CONNECTED;
+    for (const h of this.connectHandlers) {
+      h();
+    }
   }
 
   private handlePlayerAssignment(payload: Uint8Array): void {
@@ -548,10 +557,6 @@ export class RakNetClient {
     if (payload.length >= 25) {
       const blockStart = readU32BE(payload, 21);
       this._viewIdBase = blockStart * this._viewIdBase;
-    }
-    this._state = ConnectionState.CONNECTED;
-    for (const h of this.connectHandlers) {
-      h();
     }
   }
 
