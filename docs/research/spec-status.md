@@ -25,7 +25,7 @@ Last updated: 2026-06-26
 |------------|--------|-------|
 | 2.1 Offline Phase (0x09/0x0A) | Complete | MTU-padded, GUID + magic + address |
 | 2.2 Connected Phase (0x04/0x0E/0x11) | Complete | Password appended to 0x04 as plaintext |
-| 2.3 Unity Layer (0x83/0x81) | Mostly complete | 0x81 has 4 unknown fields (5-8, 9-12, 17-20, 21-28) |
+| 2.3 Unity Layer (0x83/0x81) | Complete | All 0x81 fields decoded (M10a) |
 | 2.4 Keepalive (0x00/0x03) | Complete | Ping/pong timestamps |
 
 All 0x81 fields decoded (M10a): constant_1=1, constant_0=0, player_index,

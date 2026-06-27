@@ -148,17 +148,15 @@ After the RakNet handshake completes:
 7. **S→C:** `0x81` Unity player assignment (RELIABLE_ORDERED, 29 bytes)
    ```
    Byte 0:    0x81 (msg_id)
-   Bytes 1-4:   field_1 (uint32 BE) = 1 (player index)
-   Bytes 5-8:   field_2 (uint32 BE) = 0
-   Bytes 9-12:  field_3 (uint32 BE) = 1
-   Bytes 13-16: field_4 (uint32 BE) = 50
-   Bytes 17-20: field_5 (uint32 BE) = 2
-   Bytes 21-24: field_6 (uint32 BE) = 1
-   Bytes 25-28: field_7 (uint32 BE) = 2
+   Bytes 1-4:   constant_1 (uint32 BE) = 1 (scene/level marker)
+   Bytes 5-8:   constant_0 (uint32 BE) = 0
+   Bytes 9-12:  player_index (uint32 BE) = 1-based, increments per client
+   Bytes 13-16: viewid_stride (uint32 BE) = 50 (ViewIDs per block)
+   Bytes 17-20: constant_2 (uint32 BE) = 2
+   Bytes 21-24: block_start (uint32 BE) = player_index × 2 - 1
+   Bytes 25-28: block_end (uint32 BE) = player_index × 2
    ```
-   These values are constant for single-client connections. Field meanings
-   are not fully reversed — they may encode player index, view count,
-   send rate, or synchronization mode.
+   See §7.1 for the full field breakdown and multi-client observations.
 
 ### 2.4 Keepalive (Ongoing)
 
@@ -900,9 +898,9 @@ The `RPC_NetworkPlayer` method has:
 
 ---
 
-## 15. Disconnect Cleanup (RemoveRPCs / DestroyPlayerObjects)
+## 16. Disconnect Cleanup (RemoveRPCs / DestroyPlayerObjects)
 
-### 15.1 Wire Protocol
+### 16.1 Wire Protocol
 
 `Network.RemoveRPCs(player)` and `Network.DestroyPlayerObjects(player)` are
 **purely server-side operations**. They produce **no wire messages**.
@@ -915,7 +913,7 @@ cleanup internally:
 2. Destroy all NetworkView objects owned by the disconnecting player
 3. Free the player's ViewID allocation range
 
-### 15.2 Verification
+### 16.2 Verification
 
 Experiment: Unity server with `DisconnectCleanupExperiment`. Client connects,
 allocates ViewIDs, sends buffered RPC, then disconnects. Server calls
@@ -926,7 +924,7 @@ Capture shows: client sends disconnect (last frame), server ACKs it. No
 additional frames from server after the cleanup calls. Both APIs complete
 synchronously with no wire traffic.
 
-### 15.3 Implementation Notes
+### 16.3 Implementation Notes
 
 A Python server implementation should:
 - Clean up per-client state (ViewID allocations, delta state, group memberships)
