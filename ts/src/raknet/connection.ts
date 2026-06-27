@@ -1,0 +1,553 @@
+import type { AddressInfo, IncomingMessage } from './types.js';
+import { Reliability, OFFLINE_MAGIC, MTU_SIZE, MessageId } from './types.js';
+import { ReliabilityLayer } from './reliability.js';
+import { encodeAddress } from './address.js';
+import type { UdpSocket } from './socket.js';
+
+const RAKNET_PROTOCOL_VERSION = 0x0b;
+
+export const enum ConnectionState {
+  DISCONNECTED = 0,
+  CONNECTING = 1,
+  CONNECTED = 2,
+  DISCONNECTING = 3,
+}
+
+function writeU32BE(buf: Uint8Array, offset: number, val: number): void {
+  buf[offset] = (val >>> 24) & 0xff;
+  buf[offset + 1] = (val >>> 16) & 0xff;
+  buf[offset + 2] = (val >>> 8) & 0xff;
+  buf[offset + 3] = val & 0xff;
+}
+
+function readU32BE(buf: Uint8Array, offset: number): number {
+  return (
+    (((buf[offset] ?? 0) << 24) |
+      ((buf[offset + 1] ?? 0) << 16) |
+      ((buf[offset + 2] ?? 0) << 8) |
+      (buf[offset + 3] ?? 0)) >>>
+    0
+  );
+}
+
+function randomGuid(): Uint8Array {
+  const buf = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
+    buf[i] = Math.floor(Math.random() * 256);
+  }
+  return buf;
+}
+
+export interface ClientSession {
+  readonly id: string;
+  readonly address: AddressInfo;
+  playerIndex: number;
+  viewIdBase: number;
+  viewIdEnd: number;
+  state: ConnectionState;
+  reliability: ReliabilityLayer;
+}
+
+type EventHandler<T extends unknown[]> = (...args: T) => void;
+
+export class RakNetServer {
+  private socket: UdpSocket;
+  private sessions: Map<string, ClientSession> = new Map();
+  private nextPlayerIndex = 1;
+  private readonly password: string;
+  private readonly viewIdStride: number;
+  private readonly port: number;
+  private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
+  private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
+  private messageHandlers: Array<EventHandler<[ClientSession, IncomingMessage]>> = [];
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(
+    socket: UdpSocket,
+    options: { port: number; password?: string; viewIdStride?: number },
+  ) {
+    this.socket = socket;
+    this.port = options.port;
+    this.password = options.password ?? '';
+    this.viewIdStride = options.viewIdStride ?? 50;
+  }
+
+  async start(): Promise<void> {
+    this.socket.onMessage((data, remote) => {
+      this.handlePacket(data, remote);
+    });
+    await this.socket.bind(this.port);
+    this.tickTimer = setInterval(() => {
+      this.tick();
+    }, 66);
+  }
+
+  async stop(): Promise<void> {
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+    for (const session of this.sessions.values()) {
+      if (session.state === ConnectionState.CONNECTED) {
+        session.reliability.queueOutgoing(
+          new Uint8Array([MessageId.DISCONNECTION_NOTIFICATION]),
+          Reliability.RELIABLE_ORDERED,
+        );
+        const packets = session.reliability.getOutgoingPackets();
+        for (const p of packets) {
+          this.socket.sendTo(p, session.address.host, session.address.port);
+        }
+      }
+    }
+    this.sessions.clear();
+    await this.socket.close();
+  }
+
+  onConnect(handler: EventHandler<[ClientSession]>): void {
+    this.connectHandlers.push(handler);
+  }
+
+  onDisconnect(handler: EventHandler<[ClientSession]>): void {
+    this.disconnectHandlers.push(handler);
+  }
+
+  onMessage(handler: EventHandler<[ClientSession, IncomingMessage]>): void {
+    this.messageHandlers.push(handler);
+  }
+
+  sendTo(session: ClientSession, payload: Uint8Array, reliability: Reliability): void {
+    session.reliability.queueOutgoing(payload, reliability);
+  }
+
+  getSession(id: string): ClientSession | undefined {
+    return this.sessions.get(id);
+  }
+
+  get clients(): ReadonlyMap<string, ClientSession> {
+    return this.sessions;
+  }
+
+  private tick(): void {
+    for (const session of this.sessions.values()) {
+      const packets = session.reliability.getOutgoingPackets();
+      for (const p of packets) {
+        this.socket.sendTo(p, session.address.host, session.address.port);
+      }
+      const retransmits = session.reliability.getRetransmitPackets();
+      for (const p of retransmits) {
+        this.socket.sendTo(p, session.address.host, session.address.port);
+      }
+    }
+  }
+
+  private handlePacket(data: Uint8Array, remote: AddressInfo): void {
+    const first = data[0] ?? 0;
+    const sessionId = `${remote.host}:${String(remote.port)}`;
+
+    if (first === 0x09) {
+      this.handleOpenConnectionRequest(remote, data, sessionId);
+      return;
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    const messages = session.reliability.processIncoming(data);
+    for (const msg of messages) {
+      if (!msg.payload.length) continue;
+      const msgId = msg.payload[0] ?? 0;
+      const handled = this.handleInternal(session, msgId, msg.payload);
+      if (!handled) {
+        for (const h of this.messageHandlers) {
+          h(session, msg);
+        }
+      }
+    }
+  }
+
+  private handleInternal(session: ClientSession, msgId: number, payload: Uint8Array): boolean {
+    if (msgId === 0x04) {
+      this.handleConnectionRequest(session, payload);
+      return true;
+    }
+    if (msgId === 0x11) {
+      return true;
+    }
+    if (msgId === 0x00) {
+      this.handlePing(session, payload);
+      return true;
+    }
+    if (msgId === 0x03) {
+      return true;
+    }
+    if (msgId === 0x83) {
+      this.handlePlayerReady(session);
+      return true;
+    }
+    if (msgId === 0x15) {
+      this.handleDisconnect(session);
+      return true;
+    }
+    return false;
+  }
+
+  private handleOpenConnectionRequest(
+    remote: AddressInfo,
+    data: Uint8Array,
+    sessionId: string,
+  ): void {
+    const clientGuidUpper = data.slice(2, 6);
+    const reply = new Uint8Array(MTU_SIZE);
+    reply[0] = 0x0a;
+    reply.set(OFFLINE_MAGIC, 1);
+    reply.set(clientGuidUpper, 17);
+    const serverNonce = new Uint8Array(4);
+    for (let i = 0; i < 4; i++) serverNonce[i] = Math.floor(Math.random() * 256);
+    reply.set(serverNonce, 21);
+    reply.set(encodeAddress(remote.host, remote.port), 25);
+    this.socket.sendTo(reply, remote.host, remote.port);
+
+    if (!this.sessions.has(sessionId)) {
+      this.sessions.set(sessionId, {
+        id: sessionId,
+        address: remote,
+        playerIndex: 0,
+        viewIdBase: 0,
+        viewIdEnd: 0,
+        state: ConnectionState.CONNECTING,
+        reliability: new ReliabilityLayer(remote),
+      });
+    }
+  }
+
+  private handleConnectionRequest(session: ClientSession, payload: Uint8Array): void {
+    if (this.password) {
+      const pwOffset = 1 + 16 + 8;
+      const pwBytes = payload.slice(pwOffset);
+      let clientPw = '';
+      for (let i = 0; i < pwBytes.length; i++) {
+        const b = pwBytes[i] ?? 0;
+        if (b === 0) break;
+        clientPw += String.fromCharCode(b);
+      }
+      if (clientPw !== this.password) {
+        this.sessions.delete(session.id);
+        return;
+      }
+    }
+
+    const buf = new Uint8Array(1 + 6 + 2 + 6 + 6 + 6 + 8 * 6);
+    buf[0] = 0x0e;
+    buf.set(encodeAddress(session.address.host, session.address.port), 1);
+    buf.set(encodeAddress('127.0.0.1', this.port), 9);
+    buf.set(encodeAddress('127.0.0.1', this.port), 15);
+    buf.set(encodeAddress('127.0.0.1', this.port), 21);
+    for (let i = 0; i < 8; i++) {
+      buf.set(encodeAddress('0.0.0.0', 65535), 27 + i * 6);
+    }
+    session.reliability.queueOutgoing(buf, Reliability.RELIABLE_ORDERED);
+  }
+
+  private handlePlayerReady(session: ClientSession): void {
+    const playerIdx = this.nextPlayerIndex++;
+    session.playerIndex = playerIdx;
+
+    const blockStart = playerIdx * 2 - 1;
+    const blockEnd = playerIdx * 2;
+    session.viewIdBase = blockStart * this.viewIdStride;
+    session.viewIdEnd = blockEnd * this.viewIdStride;
+
+    const buf = new Uint8Array(29);
+    buf[0] = 0x81;
+    writeU32BE(buf, 1, 1);
+    writeU32BE(buf, 5, 0);
+    writeU32BE(buf, 9, playerIdx);
+    writeU32BE(buf, 13, this.viewIdStride);
+    writeU32BE(buf, 17, 2);
+    writeU32BE(buf, 21, blockStart);
+    writeU32BE(buf, 25, blockEnd);
+    session.reliability.queueOutgoing(buf, Reliability.RELIABLE_ORDERED);
+
+    session.state = ConnectionState.CONNECTED;
+    for (const h of this.connectHandlers) {
+      h(session);
+    }
+  }
+
+  private handleDisconnect(session: ClientSession): void {
+    session.state = ConnectionState.DISCONNECTED;
+    this.sessions.delete(session.id);
+    for (const h of this.disconnectHandlers) {
+      h(session);
+    }
+  }
+
+  private handlePing(session: ClientSession, payload: Uint8Array): void {
+    if (payload.length < 5) return;
+    const pingTime = readU32BE(payload, 1);
+    const pong = new Uint8Array(17);
+    pong[0] = 0x03;
+    writeU32BE(pong, 1, pingTime);
+    writeU32BE(pong, 5, session.reliability.getTimestamp());
+    session.reliability.queueOutgoing(pong, Reliability.UNRELIABLE);
+  }
+}
+
+export class RakNetClient {
+  private socket: UdpSocket;
+  private reliability: ReliabilityLayer | null = null;
+  private _state: ConnectionState = ConnectionState.DISCONNECTED;
+  private _playerIndex = 0;
+  private _viewIdBase = 0;
+  private serverHost = '';
+  private serverPort = 0;
+  private localPort = 0;
+  private guid: Uint8Array;
+  private _password = '';
+  private messageHandlers: Array<EventHandler<[IncomingMessage]>> = [];
+  private disconnectHandlers: Array<EventHandler<[]>> = [];
+  private connectHandlers: Array<EventHandler<[]>> = [];
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(socket: UdpSocket) {
+    this.socket = socket;
+    this.guid = randomGuid();
+  }
+
+  get connected(): boolean {
+    return this._state === ConnectionState.CONNECTED;
+  }
+
+  get playerIndex(): number {
+    return this._playerIndex;
+  }
+
+  get viewIdBase(): number {
+    return this._viewIdBase;
+  }
+
+  get state(): ConnectionState {
+    return this._state;
+  }
+
+  async connect(
+    host: string,
+    port: number,
+    options?: { password?: string; timeout?: number },
+  ): Promise<void> {
+    this.serverHost = host;
+    this.serverPort = port;
+    this._password = options?.password ?? '';
+    const timeout = options?.timeout ?? 5000;
+
+    this.socket.onMessage((data, _remote) => {
+      this.handlePacket(data);
+    });
+    await this.socket.bind(0);
+    this.localPort = this.socket.localPort ?? 0;
+
+    this.reliability = new ReliabilityLayer({ host, port });
+    this._state = ConnectionState.CONNECTING;
+
+    this.sendOpenConnectionRequest();
+
+    this.tickTimer = setInterval(() => {
+      this.tick();
+    }, 66);
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('Connection timed out'));
+      }, timeout);
+
+      const checkConnect = (): void => {
+        if (this._state === ConnectionState.CONNECTED) {
+          clearTimeout(timer);
+          resolve();
+        } else if (this._state === ConnectionState.DISCONNECTED) {
+          clearTimeout(timer);
+          reject(new Error('Connection failed'));
+        } else {
+          setTimeout(checkConnect, 10);
+        }
+      };
+      checkConnect();
+    });
+  }
+
+  disconnect(): void {
+    if (this.reliability && this._state === ConnectionState.CONNECTED) {
+      this.reliability.queueOutgoing(
+        new Uint8Array([MessageId.DISCONNECTION_NOTIFICATION]),
+        Reliability.RELIABLE_ORDERED,
+      );
+      const packets = this.reliability.getOutgoingPackets();
+      for (const p of packets) {
+        this.socket.sendTo(p, this.serverHost, this.serverPort);
+      }
+    }
+    this._state = ConnectionState.DISCONNECTED;
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+  }
+
+  async close(): Promise<void> {
+    this.disconnect();
+    await this.socket.close();
+  }
+
+  send(payload: Uint8Array, reliability: Reliability): void {
+    if (this.reliability) {
+      this.reliability.queueOutgoing(payload, reliability);
+    }
+  }
+
+  onMessage(handler: EventHandler<[IncomingMessage]>): void {
+    this.messageHandlers.push(handler);
+  }
+
+  onDisconnect(handler: EventHandler<[]>): void {
+    this.disconnectHandlers.push(handler);
+  }
+
+  onConnect(handler: EventHandler<[]>): void {
+    this.connectHandlers.push(handler);
+  }
+
+  private tick(): void {
+    if (!this.reliability) return;
+    const packets = this.reliability.getOutgoingPackets();
+    for (const p of packets) {
+      this.socket.sendTo(p, this.serverHost, this.serverPort);
+    }
+    const retransmits = this.reliability.getRetransmitPackets();
+    for (const p of retransmits) {
+      this.socket.sendTo(p, this.serverHost, this.serverPort);
+    }
+  }
+
+  private handlePacket(data: Uint8Array): void {
+    const first = data[0] ?? 0;
+
+    if (first === 0x0a) {
+      this.handleOpenConnectionReply();
+      return;
+    }
+
+    if (!this.reliability) return;
+
+    const messages = this.reliability.processIncoming(data);
+    for (const msg of messages) {
+      if (!msg.payload.length) continue;
+      const msgId = msg.payload[0] ?? 0;
+      const handled = this.handleInternal(msgId, msg.payload);
+      if (!handled) {
+        for (const h of this.messageHandlers) {
+          h(msg);
+        }
+      }
+    }
+  }
+
+  private handleInternal(msgId: number, payload: Uint8Array): boolean {
+    if (msgId === 0x0e) {
+      this.handleConnectionAccepted(payload);
+      return true;
+    }
+    if (msgId === 0x00) {
+      this.handlePing(payload);
+      return true;
+    }
+    if (msgId === 0x03) {
+      return true;
+    }
+    if (msgId === 0x81) {
+      this.handlePlayerAssignment(payload);
+      return true;
+    }
+    if (msgId === 0x15) {
+      this._state = ConnectionState.DISCONNECTED;
+      for (const h of this.disconnectHandlers) {
+        h();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private sendOpenConnectionRequest(): void {
+    const buf = new Uint8Array(MTU_SIZE);
+    buf[0] = 0x09;
+    buf[1] = RAKNET_PROTOCOL_VERSION;
+    buf.set(this.guid, 2);
+    buf.set(OFFLINE_MAGIC, 10);
+    buf.set(encodeAddress(this.serverHost, this.serverPort), 26);
+    this.socket.sendTo(buf, this.serverHost, this.serverPort);
+  }
+
+  private handleOpenConnectionReply(): void {
+    this.sendConnectionRequest();
+  }
+
+  private sendConnectionRequest(): void {
+    if (!this.reliability) return;
+    const pwBytes = new TextEncoder().encode(this._password);
+    const buf = new Uint8Array(1 + 16 + 8 + pwBytes.length);
+    buf[0] = 0x04;
+    buf.set(OFFLINE_MAGIC, 1);
+    buf.set(this.guid, 17);
+    buf.set(pwBytes, 25);
+    this.reliability.queueOutgoing(buf, Reliability.RELIABLE);
+  }
+
+  private handleConnectionAccepted(_payload: Uint8Array): void {
+    if (!this.reliability) return;
+    const serverAddr = encodeAddress(this.serverHost, this.serverPort);
+    const localAddr = encodeAddress('127.0.0.1', this.localPort);
+    const emptyAddr = encodeAddress('0.0.0.0', 65535);
+
+    const buf = new Uint8Array(1 + 6 + 6 + 6 + 8 * 6);
+    buf[0] = 0x11;
+    buf.set(serverAddr, 1);
+    buf.set(localAddr, 7);
+    buf.set(localAddr, 13);
+    for (let i = 0; i < 8; i++) {
+      buf.set(emptyAddr, 19 + i * 6);
+    }
+    this.reliability.queueOutgoing(buf, Reliability.RELIABLE_ORDERED);
+
+    const ready = new Uint8Array(5);
+    ready[0] = 0x83;
+    writeU32BE(ready, 1, 1);
+    this.reliability.queueOutgoing(ready, Reliability.RELIABLE_ORDERED);
+  }
+
+  private handlePlayerAssignment(payload: Uint8Array): void {
+    if (payload.length >= 13) {
+      this._playerIndex = readU32BE(payload, 9);
+    }
+    if (payload.length >= 17) {
+      this._viewIdBase = readU32BE(payload, 13);
+    }
+    if (payload.length >= 25) {
+      const blockStart = readU32BE(payload, 21);
+      this._viewIdBase = blockStart * this._viewIdBase;
+    }
+    this._state = ConnectionState.CONNECTED;
+    for (const h of this.connectHandlers) {
+      h();
+    }
+  }
+
+  private handlePing(payload: Uint8Array): void {
+    if (!this.reliability || payload.length < 5) return;
+    const pingTime = readU32BE(payload, 1);
+    const pong = new Uint8Array(17);
+    pong[0] = 0x03;
+    writeU32BE(pong, 1, pingTime);
+    writeU32BE(pong, 5, this.reliability.getTimestamp());
+    this.reliability.queueOutgoing(pong, Reliability.UNRELIABLE);
+  }
+}
