@@ -288,12 +288,10 @@ handlers.set('rpcEncode', (inp) => {
   const params = inputToRpcParams(inp);
   const mode = RPC_MODE_FROM_NAME[inp['rpcMode'] as string];
   if (mode === undefined) throw new Error(`Unknown RPC mode: ${inp['rpcMode'] as string}`);
-  const vid = inp['viewId'] as ViewIdInput;
   const { data, bitLength } = encodeRpcSubsequent({
     methodName: inp['methodName'] as string,
     params,
-    viewId: viewIdInt(vid),
-    rpcCounter: inp['rpcCounter'] as number,
+    timestampMs: inp['timestampMs'] as number,
     mode,
   });
   return { dataHex: bytesToHex(data), bitLength };
@@ -303,7 +301,7 @@ handlers.set('rpcDecode', (inp) => {
   const d = decodeRpc(hexToBytes(inp['dataHex'] as string), inp['bitLength'] as number);
   return {
     methodName: d.methodName,
-    rpcCounter: d.rpcCounter,
+    timestampMs: d.timestampMs,
     rpcMode: d.rpcMode,
   };
 });
@@ -312,12 +310,10 @@ handlers.set('rpcFirstUse', (inp) => {
   const params = inputToRpcParams(inp);
   const mode = RPC_MODE_FROM_NAME[inp['rpcMode'] as string];
   if (mode === undefined) throw new Error(`Unknown RPC mode: ${inp['rpcMode'] as string}`);
-  const vid = inp['viewId'] as ViewIdInput;
   const { data, bitLength } = encodeRpcFirstUse({
     methodName: inp['methodName'] as string,
     params,
-    viewId: viewIdInt(vid),
-    rpcCounter: inp['rpcCounter'] as number,
+    timestampMs: inp['timestampMs'] as number,
     mode,
   });
   return { dataHex: bytesToHex(data), bitLength };

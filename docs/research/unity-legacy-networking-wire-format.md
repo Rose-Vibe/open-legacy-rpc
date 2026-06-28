@@ -175,10 +175,9 @@ RPCs use msg_id `0x1b` with RELIABLE_ORDERED reliability.
 
 | Bit Offset | Width | Field |
 |------------|-------|-------|
-| 0–7 | 8 | msg_id = `0x1b` |
-| 8–55 | 48 | NetworkViewID (all zeros for AllocatedID 0, the first scene-baked view) |
-| 56–71 | 16 | invocation counter (byte at bit 56 / 2 = RPC sequence number) |
-| 72–79 | 8 | constant `0x0b` |
+| 0–7 | 8 | msg_id = `0x1b` (ID_TIMESTAMP) |
+| 8–71 | 64 | u64 BE `senderRakNetGetTimeMS()` — server uptime in ms. RakNet's `ShiftIncomingTimestamp` reads this to produce `NetworkMessageInfo.timestamp` on the receiver. |
+| 72–79 | 8 | constant `0x0b` (RPC sub-type marker; distinguishes RPCs from state sync which uses `0x80`/`0x7f`) |
 | 80 | 1 | first_use flag (1 = includes method hash, 0 = cached index) |
 
 ### 3.2 Subsequent-Use Format (first_use = 0)
@@ -528,7 +527,7 @@ allocated IDs produces different constants; different classes on the same
 allocated ID produce the same constant.
 
 **This field is the RPC routing key.** Unity uses the constant — not the
-48-bit `view_id` header — to route incoming RPCs to the correct
+u64 timestamp header — to route incoming RPCs to the correct
 NetworkView. An RPC with a wrong constant is either delivered to the
 wrong NetworkView (if one exists at that ID) or dropped with an error.
 Correct constant = delivered; wrong constant = lost.

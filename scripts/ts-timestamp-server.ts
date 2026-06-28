@@ -23,14 +23,12 @@ server.onConnect((session: ClientSession) => {
   const interval = setInterval(() => {
     count++;
     const uptimeMs = getUptimeMs();
-    const rpcCounter = uptimeMs & 0xffff;
-    console.log(`[TS Server] Sending RPC #${count} value=${100 + count} uptimeMs=${uptimeMs} counter16=${rpcCounter}`);
+    console.log(`[TS Server] Sending RPC #${count} value=${100 + count} uptimeMs=${uptimeMs}`);
 
     const result = encodeRpcFirstUse({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 100 + count }],
-      viewId: 0,
-      rpcCounter,
+      timestampMs: uptimeMs,
       mode: RpcMode.Server,
       targetView: 0x0002,
     });
