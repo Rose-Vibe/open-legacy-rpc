@@ -12,6 +12,18 @@ The transport underneath is RakNet 3.731 (open source); the target is
 - `docs/notes/raknet-ip-limit-crash.md` — RakNet IP limit & network namespace fix
 - `docs/notes/unity-raknet-capture-decode-playbook.md` — capture & differential analysis method
 
+## PCAP Decoder Tool
+
+`tools/decode_pcap.py` decodes pcap/pcapng files into structured JSON
+(RakNet → Unity → game-specific). Accepts an optional JSON config via
+`--config` or stdin for server port, method signatures, and view names.
+Output uses discriminated unions; game-specific data is marked
+`not_deserialized` for downstream post-processing.
+
+```bash
+python3 tools/decode_pcap.py capture.pcap [--config config.json] [--compact]
+```
+
 ## Network Namespace
 
 Unity's RakNet crashes when the host has >10 IPv4 addresses. The repo

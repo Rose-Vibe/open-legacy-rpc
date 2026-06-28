@@ -83,6 +83,31 @@ for msg in client.poll(timeout=1.0):
 client.disconnect()
 ```
 
+## PCAP Decoder
+
+Decode pcap/pcapng captures into structured JSON through the full protocol
+stack (RakNet → Unity → game-specific):
+
+```bash
+python3 tools/decode_pcap.py capture.pcap                       # all defaults
+python3 tools/decode_pcap.py capture.pcap --config config.json   # with config
+python3 tools/decode_pcap.py capture.pcap --compact              # single-line JSON
+```
+
+Config file (all fields optional):
+
+```json
+{
+  "serverPort": 7777,
+  "methodSignatures": { "RPC_TakeDamage": ["int", "float"] },
+  "viewNames": { "8192": "Player" }
+}
+```
+
+Output uses discriminated unions at each layer (`type` field). Game-specific
+data that can't be decoded is marked `{ "type": "not_deserialized", "rawHex": "..." }`
+for downstream post-processing.
+
 ## Network Namespace
 
 Unity's RakNet crashes when the host has >10 IPv4 addresses. Use the
