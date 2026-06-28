@@ -56,7 +56,7 @@ def validate(test_obj):
 
     expected_data, expected_bits = encode_rpc_subsequent(
         method, params, view_id=view_id,
-        rpc_counter=inp['rpcCounter'], mode=mode,
+        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
     )
     expected_hex = expected_data.hex()
 

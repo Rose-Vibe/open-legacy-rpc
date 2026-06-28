@@ -206,21 +206,34 @@ hash. All further calls to the same method on that connection use
 **subsequent-use** messages containing only a 7-bit `method_index`.
 
 Both sides must agree on which index maps to which method. The mapping
-is established by the protocol itself — no out-of-band configuration is
-required:
+is established via the **RPC Batch Index** protocol (msg_id `0x07`,
+see §3.8) — a separate UNRELIABLE message sent by the receiver after
+processing a first-use RPC.
 
-1. Sender sends first-use for method M (includes Huffman hash → name).
-2. Sender sends subsequent-use for method M (includes `method_index` I).
-3. Receiver decodes the first-use hash to learn the method name.
-4. Receiver sees the subsequent-use with index I immediately after.
-5. Receiver now knows: index I = method M.
-6. All future subsequent-use messages with index I decode to method M.
+The complete exchange for each method on a given connection:
 
-Unity always sends first-use then subsequent-use in strict pairs on
-RELIABLE_ORDERED delivery, so the receiver can learn every mapping from
-traffic alone. A non-Unity implementation that always sends first-use
-(never subsequent-use) is fully compatible — it just costs ~20 extra
-bytes per RPC for the Huffman hash.
+1. Sender sends first-use for method M to Receiver (Huffman hash → name).
+2. Receiver resolves the hash, looks up its own `method_index` for M.
+3. Receiver sends an RPC Batch Index message (§3.8) back to Sender,
+   containing: method_id + Receiver's own `method_index` I.
+4. Sender receives the batch index, stores: "when encoding subsequent-use
+   for method M to this peer, use index I."
+5. Sender now sends subsequent-use with index I for all further calls.
+6. Receiver decodes index I → method M using its own local mapping.
+
+Each peer registers its **own** index with the other side — the sender
+uses the **receiver's** registered index, not its own. This allows two
+builds with different assemblies (and therefore different method indices)
+to communicate correctly without pre-shared configuration.
+
+Unity waits for the batch index response before switching from first-use
+to subsequent-use. If the receiver never sends a batch index (e.g., a
+non-Unity implementation), the sender continues using first-use.
+
+A non-Unity implementation that always sends first-use (never
+subsequent-use) is fully compatible — it just costs ~20 extra bytes per
+RPC for the Huffman hash. No batch index exchange is required in this
+case.
 
 ### 3.2.2 Method Index Derivation (Unity internals)
 
@@ -550,7 +563,79 @@ if relay:
     write_bits(0, 5)
 ```
 
-### 3.8 WriteCompressed\<uint32\>
+### 3.8 RPC Batch Index (msg_id 0x07)
+
+After receiving a first-use RPC for a method it hasn't seen before, the
+receiver sends an **RPC Batch Index** message (msg_id `0x07`) back to the
+sender. This message registers the receiver's own `method_index` for that
+method, telling the sender what index to use in subsequent-use messages.
+
+The message uses UNRELIABLE reliability (no retransmit).
+
+#### 3.8.1 Wire Format
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 1 | msg_id = `0x07` |
+| 1–4 | 4 | `method_id_bit_count / 2` (uint32 BE) |
+| 5+ | var | BitStream payload (see below) |
+
+The BitStream payload contains:
+
+| Bit Offset | Width | Field |
+|------------|-------|-------|
+| 0 | 1 | flag (observed: always 0) |
+| 1 | N | method_id (N = `method_id_bit_count`, same encoding as §3.3.2) |
+| 1+N | 7 | method_index (the sender of this message's own index for the method) |
+| 1+N+7 | pad | zero padding to byte boundary |
+
+Total bit count: `1 + method_id_bit_count + 7`, rounded up to the
+next byte boundary.
+
+#### 3.8.2 Observed Examples
+
+From a cross-binary experiment with original (O) and patched (P) builds:
+
+| Direction | Method | method_id (hex) | Registered idx | Build |
+|-----------|--------|-----------------|----------------|-------|
+| O→P | RPC_Int | 0c93b276d5b1d456 | 0x60 | Original |
+| P→O | RPC_Int | 0c93b276d5b1d456 | 0x6c | Patched |
+| O→P | RPC_Float | 0c93b276d5b1564a1a | 0x64 | Original |
+| P→O | RPC_Float | 0c93b276d5b1564a1a | 0x70 | Patched |
+
+The index difference (0x0c = 12) matches exactly 3 extra [RPC] methods
+× 4 stride added by the patching.
+
+#### 3.8.3 Protocol Sequence
+
+For method M between peers A and B:
+
+```
+A → B:  FIRST-USE [M] (hash, RELIABLE_ORDERED)
+B → A:  BATCH INDEX [M, idx=Y] (UNRELIABLE)    ← B's own index
+A → B:  SUBSEQUENT-USE [M, idx=Y] (RELIABLE_ORDERED)
+```
+
+A uses B's registered index Y (not A's own index) for all subsequent
+calls to M addressed to B. If A also calls M and B has a different index,
+B separately registers its index with A.
+
+#### 3.8.4 Implementer Notes
+
+A non-Unity implementation that always sends first-use does not need to
+send or process batch index messages. However, to support subsequent-use
+(saving ~20 bytes per RPC), an implementation must:
+
+1. **Receiving side:** After processing an incoming first-use, send a
+   batch index message containing the receiver's own `method_index` for
+   that method.
+2. **Sending side:** Listen for incoming batch index messages. Store the
+   registered index per peer per method. Use the registered index (not
+   the local index) when encoding subsequent-use.
+3. **Fallback:** If no batch index is received, continue sending
+   first-use indefinitely.
+
+### 3.9 WriteCompressed\<uint32\>
 
 RakNet's compressed write for uint32, with DoEndianSwap=true (big-endian
 on wire for x86).
@@ -570,7 +655,7 @@ For the final (most significant) byte, there's a half-byte optimization:
 - Byte 0 (MSB) = 0x38 → top nibble = 0x3 ≠ 0 → flag=0, write 8 bits
 - Wire: `1 1 1 0 00111000` = 12 bits
 
-### 3.9 Huffman String Encoding
+### 3.10 Huffman String Encoding
 
 Strings in RPCs use RakNet's StringCompressor with the
 `englishCharacterFrequencies` table. The encoded bitstream uses a
@@ -867,7 +952,7 @@ Data (35 bits):
 | `0x00` | UNRELIABLE/RELIABLE | both | Internal ping |
 | `0x03` | UNRELIABLE | both | Connected pong |
 | `0x04` | RELIABLE | C→S | Connection request |
-| `0x07` | UNRELIABLE | S→C | Connection request accepted (variant) |
+| `0x07` | UNRELIABLE | both | RPC batch index registration (§3.8) |
 | `0x09` | (offline) | C→S | Open connection request |
 | `0x0a` | (offline) | S→C | Open connection reply |
 | `0x0e` | RELIABLE_ORDERED | S→C | Connection request accepted |

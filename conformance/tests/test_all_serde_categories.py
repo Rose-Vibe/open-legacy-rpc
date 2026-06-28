@@ -22,13 +22,13 @@ ALL_CATEGORIES = sorted(GENERATORS.keys())
 
 class TestAllCategoriesLoad:
     def test_30_generators_registered(self):
-        assert len(GENERATORS) == 30
+        assert len(GENERATORS) == 32
 
     def test_30_validators_registered(self):
-        assert len(VALIDATORS) == 30
+        assert len(VALIDATORS) == 32
 
     def test_30_processors_registered(self):
-        assert len(PROCESSORS) == 30
+        assert len(PROCESSORS) == 32
 
     def test_same_keys(self):
         assert set(GENERATORS.keys()) == set(VALIDATORS.keys()) == set(PROCESSORS.keys())
@@ -100,7 +100,7 @@ class TestCLIListsAllCategories:
         )
         assert r.returncode == 0
         lines = [l.strip() for l in r.stdout.strip().split('\n') if l.strip()]
-        assert len(lines) == 30
+        assert len(lines) == 32
 
     def test_list_matches_registry(self):
         r = subprocess.run(
@@ -123,6 +123,7 @@ ROUNDTRIP_PAIRS = [
     ('stateSync', 'stateSyncDecode'),
     ('deltaStateSync', 'deltaSyncDecode'),
     ('addressEncode', 'addressDecode'),
+    ('batchIndexEncode', 'batchIndexDecode'),
 ]
 
 

@@ -28,6 +28,8 @@ from .view_id import validate as validate_viewId
 from .view_id_param import validate as validate_viewIdParam
 from .address_encode import validate as validate_addressEncode
 from .address_decode import validate as validate_addressDecode
+from .batch_index_encode import validate as validate_batchIndexEncode
+from .batch_index_decode import validate as validate_batchIndexDecode
 
 VALIDATORS = {
     'writeCompressed': validate_writeCompressed,
@@ -60,4 +62,6 @@ VALIDATORS = {
     'viewIdParam': validate_viewIdParam,
     'addressEncode': validate_addressEncode,
     'addressDecode': validate_addressDecode,
+    'batchIndexEncode': validate_batchIndexEncode,
+    'batchIndexDecode': validate_batchIndexDecode,
 }

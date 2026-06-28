@@ -32,6 +32,7 @@ from protocol.unity_protocol import (
     encode_view_id, encode_view_id_16,
     encode_state_sync, decode_state_sync,
     encode_delta_state_sync, decode_delta_state_sync,
+    encode_batch_index, decode_batch_index,
     RPCMode, METHOD_INDEX_MAP, METHOD_SIGNATURES,
 )
 from protocol.raknet_transport import encode_address, decode_address
@@ -233,7 +234,7 @@ def process_rpcEncode(inp):
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_subsequent(
         inp['methodName'], params, view_id=_view_id_int(inp['viewId']),
-        rpc_counter=inp['rpcCounter'], mode=mode,
+        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
     )
     return {'dataHex': data.hex(), 'bitLength': bits}
 
@@ -252,7 +253,7 @@ def process_rpcFirstUse(inp):
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_first_use(
         inp['methodName'], params, view_id=_view_id_int(inp['viewId']),
-        rpc_counter=inp['rpcCounter'], mode=mode,
+        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
     )
     return {'dataHex': data.hex(), 'bitLength': bits}
 
@@ -357,6 +358,22 @@ def process_deltaSyncDecode(inp):
     }
 
 
+def process_batchIndexEncode(inp):
+    data, bits = encode_batch_index(inp['methodName'], inp['methodIndex'])
+    return {'dataHex': data.hex(), 'bitLength': bits}
+
+
+def process_batchIndexDecode(inp):
+    payload = bytes.fromhex(inp['dataHex'])
+    result = decode_batch_index(payload)
+    if result is None:
+        return {'methodName': None, 'methodIndex': 0}
+    return {
+        'methodName': result['method_name'],
+        'methodIndex': result['method_index'],
+    }
+
+
 PROCESSORS = {
     'writeCompressed': process_writeCompressed,
     'readCompressed': process_readCompressed,
@@ -388,6 +405,8 @@ PROCESSORS = {
     'viewIdParam': process_viewIdParam,
     'addressEncode': process_addressEncode,
     'addressDecode': process_addressDecode,
+    'batchIndexEncode': process_batchIndexEncode,
+    'batchIndexDecode': process_batchIndexDecode,
 }
 
 

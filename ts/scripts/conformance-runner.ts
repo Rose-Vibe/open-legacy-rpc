@@ -8,6 +8,8 @@ import {
   encodeRpcSubsequent,
   encodeRpcFirstUse,
   decodeRpc,
+  encodeBatchIndex,
+  decodeBatchIndex,
   RPC_MODE_FROM_NAME,
 } from '../src/unity/rpc.js';
 import type { RpcParam } from '../src/unity/rpc.js';
@@ -529,6 +531,23 @@ handlers.set('removeRow', (inp) => {
 handlers.set('removeRowDecode', (inp) => {
   const d = decodeRemoveRow(hexToBytes(inp['dataHex'] as string));
   return { tableName: d.table, rowId: d.rowId };
+});
+
+// ── Batch Index ──
+
+handlers.set('batchIndexEncode', (inp) => {
+  const { data, bitLength } = encodeBatchIndex(
+    inp['methodName'] as string,
+    inp['methodIndex'] as number,
+  );
+  return { dataHex: bytesToHex(data), bitLength };
+});
+
+handlers.set('batchIndexDecode', (inp) => {
+  const payload = hexToBytes(inp['dataHex'] as string);
+  const result = decodeBatchIndex(payload);
+  if (!result) return { methodName: null, methodIndex: 0 };
+  return { methodName: result.methodName, methodIndex: result.methodIndex };
 });
 
 // ── Main ──

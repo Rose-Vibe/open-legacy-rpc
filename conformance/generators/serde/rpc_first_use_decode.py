@@ -28,7 +28,8 @@ def _encode(inp):
     view_id = vid['id'] if vid['scope'] == 'scene' else (0x100000000 | vid['id'])
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_first_use(inp['methodName'], params, view_id=view_id,
-                                       rpc_counter=inp['rpcCounter'], mode=mode)
+                                       rpc_counter=inp['rpcCounter'], mode=mode,
+                                       target_view=0x2000)
     return data.hex(), bits
 
 

@@ -12,6 +12,7 @@ from protocol.unity_protocol import (
     encode_instantiate_group_flags, decode_instantiate_group_flags,
     encode_instantiate_params, decode_instantiate_params,
     METHOD_TAG_MAP, register_method_tag, register_method_tags,
+    encode_batch_index, decode_batch_index, MSG_ID_BATCH_INDEX,
 )
 from protocol.bitstream import BitStream
 
@@ -695,6 +696,38 @@ def test_first_use_remaining_bit_count():
     # param_bits=32 (int), target_bits=0 (Server mode)
     assert remaining == 32 + 19 + 0, \
         f"Expected 51, got {remaining}"
+
+
+def test_batch_index_encode_decode_roundtrip():
+    methods = [('RPC_Int', 0x60), ('RPC_Float', 4), ('RPC_Void', 2),
+               ('RPC_String', 126), ('RPC_Alpha', 0), ('RPC_Int', 127)]
+    for name, idx in methods:
+        data, bits = encode_batch_index(name, idx)
+        assert data[0] == MSG_ID_BATCH_INDEX
+        result = decode_batch_index(data)
+        assert result is not None, f"decode returned None for {name}/{idx}"
+        assert result['method_name'] == name
+        assert result['method_index'] == idx
+
+
+def test_batch_index_decode_rejects_wrong_msgid():
+    assert decode_batch_index(b'\x1b\x00\x00\x00\x00\x00') is None
+
+
+def test_batch_index_decode_rejects_short():
+    assert decode_batch_index(b'\x07\x00\x00') is None
+
+
+def test_batch_index_method_index_override():
+    data_override, bits_override = encode_rpc_subsequent(
+        'RPC_Int', [42], mode=RPCMode.Server, target_view=0x2000,
+        method_index=0x60)
+    data_default, bits_default = encode_rpc_subsequent(
+        'RPC_Int', [42], mode=RPCMode.Server, target_view=0x2000)
+    default_idx = METHOD_INDEX_MAP.get('RPC_Int')
+    assert bits_override == bits_default, "bit length should match"
+    if default_idx != 0x60:
+        assert data_override != data_default, "override should produce different bytes"
 
 
 if __name__ == '__main__':

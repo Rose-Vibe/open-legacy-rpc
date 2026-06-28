@@ -28,6 +28,8 @@ from .view_id import generate as generate_viewId
 from .view_id_param import generate as generate_viewIdParam
 from .address_encode import generate as generate_addressEncode
 from .address_decode import generate as generate_addressDecode
+from .batch_index_encode import generate as generate_batchIndexEncode
+from .batch_index_decode import generate as generate_batchIndexDecode
 
 GENERATORS = {
     'writeCompressed': generate_writeCompressed,
@@ -60,4 +62,6 @@ GENERATORS = {
     'viewIdParam': generate_viewIdParam,
     'addressEncode': generate_addressEncode,
     'addressDecode': generate_addressDecode,
+    'batchIndexEncode': generate_batchIndexEncode,
+    'batchIndexDecode': generate_batchIndexDecode,
 }

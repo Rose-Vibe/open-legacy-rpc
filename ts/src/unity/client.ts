@@ -10,6 +10,9 @@ import {
   getBuiltinMethodNames,
   hasMethodIndex,
   learnMethodIndex,
+  encodeBatchIndex,
+  decodeBatchIndex,
+  MSG_ID_BATCH_INDEX,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
@@ -37,9 +40,12 @@ export class UnityClient {
   private stateSyncHandlers = new Map<number | null, EventHandler<[StateSyncMessage]>>();
   private connectHandlers: Array<EventHandler<[]>> = [];
   private disconnectHandlers: Array<EventHandler<[string]>> = [];
-  private rpcSentMethods = new Set<string>(getBuiltinMethodNames());
   private rpcReceivedFirstUse: string[] = [];
   private rpcCounter = 0;
+  private serverIndices = new Map<string, number>();
+  private ourIndices = new Map<string, number>();
+  private ourIndexReverse = new Map<number, string>();
+  private nextOurIndex = 2;
 
   constructor(socket: UdpSocket) {
     this.raknet = new RakNetClient(socket);
@@ -50,6 +56,10 @@ export class UnityClient {
 
     this.raknet.onDisconnect(() => {
       this.rpcReceivedFirstUse = [];
+      this.serverIndices.clear();
+      this.ourIndices.clear();
+      this.ourIndexReverse.clear();
+      this.nextOurIndex = 2;
       for (const h of this.disconnectHandlers) h('disconnected');
     });
 
@@ -138,11 +148,13 @@ export class UnityClient {
 
     const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
     let result: { data: Uint8Array; bitLength: number };
-    if (this.rpcSentMethods.has(methodName) && hasMethodIndex(methodName)) {
+    const serverIdx = this.serverIndices.get(methodName);
+    if (serverIdx !== undefined) {
+      result = encodeRpcSubsequent({ ...opts, methodIndex: serverIdx });
+    } else if (hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent(opts);
     } else {
       result = encodeRpcFirstUse(opts);
-      if (hasMethodIndex(methodName)) this.rpcSentMethods.add(methodName);
     }
 
     this.raknet.send(result.data, Reliability.RELIABLE_ORDERED, result.bitLength);
@@ -153,7 +165,12 @@ export class UnityClient {
   }
 
   private handleMessage(msg: IncomingMessage): void {
-    if (msg.payload[0] !== 0x1b) return;
+    const msgId = msg.payload[0];
+    if (msgId === MSG_ID_BATCH_INDEX) {
+      this.handleBatchIndex(msg);
+      return;
+    }
+    if (msgId !== 0x1b) return;
 
     if (msg.reliability === Reliability.UNRELIABLE_SEQUENCED) {
       this.handleStateSync(msg);
@@ -177,18 +194,38 @@ export class UnityClient {
 
     if (decoded.firstUse && decoded.methodName !== 'unknown') {
       this.rpcReceivedFirstUse.push(decoded.methodName);
-    } else if (!decoded.firstUse && decoded.methodIndex !== undefined &&
-               decoded.methodName.startsWith('unknown_0x') &&
-               this.rpcReceivedFirstUse.length > 0) {
-      const pending = this.rpcReceivedFirstUse.shift()!;
-      learnMethodIndex(pending, decoded.methodIndex);
-      decoded.methodName = pending;
+
+      if (!this.ourIndices.has(decoded.methodName)) {
+        const idx = this.nextOurIndex;
+        this.nextOurIndex += 2;
+        this.ourIndices.set(decoded.methodName, idx);
+        this.ourIndexReverse.set(idx, decoded.methodName);
+      }
+      const ourIdx = this.ourIndices.get(decoded.methodName)!;
+      const batch = encodeBatchIndex(decoded.methodName, ourIdx);
+      this.raknet.send(batch.data, Reliability.UNRELIABLE, batch.bitLength);
+    } else if (!decoded.firstUse && decoded.methodIndex !== undefined) {
+      const resolved = this.ourIndexReverse.get(decoded.methodIndex);
+      if (resolved) {
+        decoded.methodName = resolved;
+      } else if (decoded.methodName.startsWith('unknown_0x') &&
+                 this.rpcReceivedFirstUse.length > 0) {
+        const pending = this.rpcReceivedFirstUse.shift()!;
+        learnMethodIndex(pending, decoded.methodIndex);
+        decoded.methodName = pending;
+      }
     }
 
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
       handler(...decoded.params);
     }
+  }
+
+  private handleBatchIndex(msg: IncomingMessage): void {
+    const decoded = decodeBatchIndex(msg.payload);
+    if (!decoded || !decoded.methodName) return;
+    this.serverIndices.set(decoded.methodName, decoded.methodIndex);
   }
 
   private handleStateSync(msg: IncomingMessage): void {

@@ -14,11 +14,13 @@ Unity's legacy networking (`NetworkView.RPC()`, last supported in Unity
 
 This document covers:
 1. How first-use and subsequent-use relate in the protocol
-2. How a non-Unity implementation can decode both without knowing Unity's
+2. The **RPC Batch Index** protocol (msg_id `0x07`) — discovered
+   2026-06-28 — which registers method indices between peers
+3. How a non-Unity implementation can decode both without knowing Unity's
    internal formula
-3. What we learned about Unity's internal index derivation (partially
+4. What we learned about Unity's internal index derivation (partially
    reverse-engineered, not fully solved)
-4. A bug found and fixed in the TS implementation
+5. A bug found and fixed in the TS implementation
 
 ## The Protocol: First-Use / Subsequent-Use Pairs
 
@@ -38,29 +40,83 @@ sent. On a new connection, the cycle resets — first-use is sent again.
 
 ### How the receiver learns the mapping
 
-Unity always sends first-use and subsequent-use in strict pairs on
+~~Unity always sends first-use and subsequent-use in strict pairs on
 `RELIABLE_ORDERED` delivery. The receiver can learn every mapping from
-the traffic itself:
+the traffic itself.~~ **Corrected (2026-06-28):** The actual protocol
+uses a dedicated index registration message (msg_id `0x07`), not
+implicit learning from first-use/subsequent-use pairs.
 
-1. Receive first-use → decode Huffman hash → method name is `"Foo"`
-2. Receive subsequent-use with unknown index `0x5c` → it must be `"Foo"`
-   (it immediately follows the first-use)
-3. Register: `0x5c` → `"Foo"` for all future messages
+The correct protocol (discovered via cross-binary experiment):
 
-This is implemented as `learnMethodIndex()` in `ts/src/unity/rpc.ts`,
-with per-session pending queues in `server.ts` and `client.ts`.
+1. Sender sends first-use for method M to Receiver (Huffman hash)
+2. Receiver resolves the hash → method name `"Foo"`
+3. Receiver sends an **RPC Batch Index** message (msg_id `0x07`,
+   UNRELIABLE) back to Sender, containing: method_id + Receiver's
+   own `method_index` for M
+4. Sender receives the batch index, stores: "when sending subsequent-use
+   for M to this Receiver, use index I"
+5. Sender sends subsequent-use with index I
+6. Receiver decodes I → `"Foo"` using its own local method table
+
+Each peer registers its **own** index with the other side. The sender
+uses the **receiver's** registered index, not its own. This is why
+two builds with different assemblies (different indices) can
+communicate — each side declares its own mapping.
+
+The `learnMethodIndex()` mechanism in `ts/src/unity/rpc.ts` works as
+an alternative — it learns indices from observed first-use/subsequent-use
+pairs in traffic. This catches indices sent by Unity (which uses its own
+index, registered with us via batch). Both mechanisms achieve the same
+result.
+
+### Evidence: cross-binary Unity communication (experiment 2)
+
+Two Unity builds with **different** assemblies (one patched with 3
+extra `[RPC]` methods, shifting all indices by +12) were connected
+and exchanged RPCs. All RPCs were received correctly by both sides.
+
+Wire capture confirmed:
+
+| Method | Original build idx | Patched build idx | Difference |
+|--------|-------------------|-------------------|------------|
+| RPC_Int | 0x60 | 0x6c | +12 |
+| RPC_Float | 0x64 | 0x70 | +12 |
+| RPC_String | 0x68 | 0x74 | +12 |
+
+The batch index protocol was observed between every first-use and
+first subsequent-use:
+
+```
+S→C  FIRST-USE [RPC_Int]     (hash, RELIABLE_ORDERED)
+C→S  BATCH INDEX idx=0x60    (client registers its own index, UNRELIABLE)
+C→S  FIRST-USE [RPC_Int]     (hash, RELIABLE_ORDERED)
+S→C  BATCH INDEX idx=0x6c    (server registers its own index, UNRELIABLE)
+S→C  SUBSEQUENT idx=0x60     (server uses client's registered index ✓)
+C→S  SUBSEQUENT idx=0x6c     (client uses server's registered index ✓)
+```
+
+### Evidence: Python wrong-index experiment (experiment 1)
+
+A Python server sent first-use RPCs (accepted) and subsequent-use RPCs
+with deliberately wrong indices (rejected). The pcap revealed Unity
+**did** send a batch index (idx=0x60) after receiving our first-use,
+but our server ignored it and used a fake index (0x30). Unity rejected
+the mismatch.
+
+This proves the batch index is required for subsequent-use to work.
 
 ### Sending without knowing the index
 
 An implementation can always send first-use instead of subsequent-use.
 The server's `sendRpcTo()` checks `hasMethodIndex(methodName)`: if false,
-it sends first-use. Once an index is learned from incoming traffic,
-`hasMethodIndex()` returns true, and subsequent calls automatically use
-the more compact subsequent-use encoding.
+it sends first-use. Once an index is learned from incoming traffic
+(via `learnMethodIndex()` or batch index processing), `hasMethodIndex()`
+returns true, and subsequent calls automatically use the more compact
+subsequent-use encoding.
 
 This means a non-Unity server that has never received traffic for a
 method will send first-use (slightly larger, ~20 extra bytes for the
-Huffman hash), and Unity will accept it. No compatibility issue.
+Huffman hash), and Unity will accept it. No batch index exchange needed.
 
 ## Bug Found and Fixed
 

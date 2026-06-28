@@ -15,6 +15,8 @@ from .raknet_transport import Reliability
 from .unity_protocol import (
     RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
     decode_rpc, decode_state_sync, METHOD_SIGNATURES, is_rpc,
+    MSG_ID_BATCH_INDEX, encode_batch_index, decode_batch_index,
+    INDEX_TO_METHOD,
 )
 from .bitstream import BitStream
 
@@ -26,12 +28,12 @@ class UnityClient:
         self._raknet = RakNetClient()
         self._rpc_handlers = {}
         self._state_sync_handlers = {}
-        # Pre-register all known methods so we always use subsequent-use
-        # encoding (which has a known-correct wire format). First-use
-        # encoding has unresolved metadata fields.
-        self._rpc_sent_methods = set(METHOD_SIGNATURES.keys())
         self._rpc_counter = 0
         self._viewid_counter = 0
+        self._server_indices = {}  # method_name -> server's index
+        self._our_indices = {}  # method_name -> our assigned index
+        self._our_index_reverse = {}  # our index -> method_name
+        self._next_our_index = 2
 
     @property
     def connected(self):
@@ -79,13 +81,14 @@ class UnityClient:
         counter = self._rpc_counter
         self._rpc_counter += 1
 
-        if method_name not in self._rpc_sent_methods:
-            payload, bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode,
-                target_view=target_view, relay=relay)
-            self._rpc_sent_methods.add(method_name)
-        else:
+        server_idx = self._server_indices.get(method_name)
+        if server_idx is not None:
             payload, bits = encode_rpc_subsequent(
+                method_name, params, view_id, counter, mode,
+                target_view=target_view, relay=relay,
+                method_index=server_idx)
+        else:
+            payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, counter, mode,
                 target_view=target_view, relay=relay)
 
@@ -96,7 +99,9 @@ class UnityClient:
         """Poll for incoming messages. Dispatches to registered handlers."""
         messages = self._raknet.poll(timeout)
         for msg_id, payload, reliability, bit_length in messages:
-            if msg_id == ID_UNITY_RPC_OR_SYNC:
+            if msg_id == MSG_ID_BATCH_INDEX:
+                self._handle_batch_index(payload)
+            elif msg_id == ID_UNITY_RPC_OR_SYNC:
                 if reliability == Reliability.UNRELIABLE_SEQUENCED:
                     self._handle_state_sync(payload, bit_length)
                 elif reliability == Reliability.RELIABLE_ORDERED:
@@ -122,10 +127,43 @@ class UnityClient:
             log.warning("Failed to decode RPC (%d bytes)", len(payload),
                         exc_info=True)
             return
+
+        if result.get('first_use'):
+            method = result.get('method_name', '')
+            if method and method != 'unknown':
+                if method not in self._our_indices:
+                    idx = self._next_our_index
+                    self._next_our_index += 2
+                    self._our_indices[method] = idx
+                    self._our_index_reverse[idx] = method
+                    INDEX_TO_METHOD[idx] = method
+                our_idx = self._our_indices[method]
+                batch_payload, batch_bits = encode_batch_index(method, our_idx)
+                self._raknet.send_message(batch_payload,
+                                          Reliability.UNRELIABLE,
+                                          bit_length=batch_bits)
+        else:
+            method_name = result.get('method_name', '')
+            if method_name.startswith('unknown_0x'):
+                try:
+                    method_idx = int(method_name[len('unknown_0x'):], 16)
+                except ValueError:
+                    method_idx = None
+                if method_idx is not None:
+                    resolved = self._our_index_reverse.get(method_idx)
+                    if resolved:
+                        result['method_name'] = resolved
+
         method = result.get('method_name', '')
         if method in self._rpc_handlers:
             params = result.get('params', [])
             self._rpc_handlers[method](*params)
+
+    def _handle_batch_index(self, payload):
+        decoded = decode_batch_index(payload)
+        if not decoded or not decoded.get('method_name'):
+            return
+        self._server_indices[decoded['method_name']] = decoded['method_index']
 
     def _handle_state_sync(self, payload, bit_length):
         try:

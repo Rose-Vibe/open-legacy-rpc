@@ -9,6 +9,9 @@ import {
   decodeRpc,
   isRpc,
   learnMethodIndex,
+  encodeBatchIndex,
+  decodeBatchIndex,
+  MSG_ID_BATCH_INDEX,
   RpcMode,
 } from '../src/unity/rpc.js';
 import {
@@ -25,6 +28,48 @@ function bytesToHex(bytes: Uint8Array): string {
   }
   return hex;
 }
+
+describe('Batch Index (0x07)', () => {
+  it('encode/decode round-trips for RPC_Int', () => {
+    const idx = 0x60;
+    const { data, bitLength } = encodeBatchIndex('RPC_Int', idx);
+    expect(data[0]).toBe(MSG_ID_BATCH_INDEX);
+    const decoded = decodeBatchIndex(data);
+    expect(decoded).not.toBeNull();
+    expect(decoded!.methodName).toBe('RPC_Int');
+    expect(decoded!.methodIndex).toBe(idx);
+  });
+
+  it('encode/decode round-trips for multiple methods', () => {
+    const methods = [
+      ['RPC_Int', 2],
+      ['RPC_Float', 4],
+      ['RPC_String', 6],
+      ['RPC_Void', 8],
+    ] as const;
+    for (const [name, idx] of methods) {
+      const { data } = encodeBatchIndex(name, idx);
+      const decoded = decodeBatchIndex(data);
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodName).toBe(name);
+      expect(decoded!.methodIndex).toBe(idx);
+    }
+  });
+
+  it('returns null for non-0x07 payload', () => {
+    expect(decodeBatchIndex(new Uint8Array([0x1b, 0, 0, 0, 0, 0]))).toBeNull();
+  });
+
+  it('returns null for too-short payload', () => {
+    expect(decodeBatchIndex(new Uint8Array([0x07, 0, 0]))).toBeNull();
+  });
+
+  it('method_index 7-bit range works', () => {
+    const { data } = encodeBatchIndex('RPC_Int', 126);
+    const decoded = decodeBatchIndex(data);
+    expect(decoded!.methodIndex).toBe(126);
+  });
+});
 
 describe('ViewID', () => {
   it('encodes scene ViewID as 16-bit', () => {

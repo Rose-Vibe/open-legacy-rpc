@@ -7,6 +7,7 @@ wire format.
 import sys
 from protocol.unity_protocol import (
     encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
+    encode_batch_index, decode_batch_index,
     RPCMode, INTERNAL_RPC_CONSTANT, METHOD_TAG_MAP,
     register_method_tag,
 )
@@ -294,6 +295,42 @@ def test_16bit_counter_in_wire():
     data, _ = _encode(GOLDEN['sub_int_42_c500'])
     assert data[7] == 0x03  # high byte
     assert data[8] == 0xE8  # low byte
+
+
+GOLDEN_BATCH = {
+    'rpc_int_0x60': {
+        'hex': '07000000200649d93b6ad8ea2b60',
+        'bits': 112,
+        'methodName': 'RPC_Int',
+        'methodIndex': 0x60,
+    },
+    'rpc_void_2': {
+        'hex': '07000000240649d93b6ad8aaf42382',
+        'bits': 120,
+        'methodName': 'RPC_Void',
+        'methodIndex': 2,
+    },
+}
+
+
+def test_batch_index_encode_matches_ts():
+    for name, entry in GOLDEN_BATCH.items():
+        data, bits = encode_batch_index(entry['methodName'], entry['methodIndex'])
+        assert data.hex() == entry['hex'], \
+            f"{name}: hex {data.hex()} != {entry['hex']}"
+        assert bits == entry['bits'], \
+            f"{name}: bits {bits} != {entry['bits']}"
+
+
+def test_batch_index_decode_matches_ts():
+    for name, entry in GOLDEN_BATCH.items():
+        raw = bytes.fromhex(entry['hex'])
+        decoded = decode_batch_index(raw)
+        assert decoded is not None, f"{name}: decode returned None"
+        assert decoded['method_name'] == entry['methodName'], \
+            f"{name}: method {decoded['method_name']} != {entry['methodName']}"
+        assert decoded['method_index'] == entry['methodIndex'], \
+            f"{name}: index {decoded['method_index']} != {entry['methodIndex']}"
 
 
 if __name__ == '__main__':

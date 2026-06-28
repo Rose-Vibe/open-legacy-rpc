@@ -11,6 +11,9 @@ import {
   getBuiltinMethodNames,
   hasMethodIndex,
   learnMethodIndex,
+  encodeBatchIndex,
+  decodeBatchIndex,
+  MSG_ID_BATCH_INDEX,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
@@ -39,9 +42,12 @@ export class UnityServer {
   private stateSyncHandlers: Array<EventHandler<[ClientSession, StateSyncMessage]>> = [];
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
-  private rpcSentMethods = new Map<string, Set<string>>();
   private rpcReceivedFirstUse = new Map<string, string[]>();
   private rpcCounters = new Map<string, number>();
+  private peerIndices = new Map<string, Map<string, number>>();
+  private ourIndices = new Map<string, number>();
+  private ourIndexReverse = new Map<number, string>();
+  private nextOurIndex = 2;
   private syncTimestamp = 0;
   private deltaState = new Map<string, number[]>();
 
@@ -54,15 +60,15 @@ export class UnityServer {
     this.raknet = new RakNetServer(socket, rakOpts);
 
     this.raknet.onConnect((session) => {
-      this.rpcSentMethods.set(session.id, new Set(getBuiltinMethodNames()));
       this.rpcCounters.set(session.id, 0);
+      this.peerIndices.set(session.id, new Map());
       for (const h of this.connectHandlers) h(session);
     });
 
     this.raknet.onDisconnect((session) => {
-      this.rpcSentMethods.delete(session.id);
       this.rpcReceivedFirstUse.delete(session.id);
       this.rpcCounters.delete(session.id);
+      this.peerIndices.delete(session.id);
       for (const key of this.deltaState.keys()) {
         if (key.startsWith(session.id + ':')) {
           this.deltaState.delete(key);
@@ -217,29 +223,30 @@ export class UnityServer {
     targetView: ViewId | number,
     relay?: boolean,
   ): void {
-    let sent = this.rpcSentMethods.get(session.id);
-    if (!sent) {
-      sent = new Set(getBuiltinMethodNames());
-      this.rpcSentMethods.set(session.id, sent);
-    }
-
     const counter = this.rpcCounters.get(session.id) ?? 0;
     this.rpcCounters.set(session.id, counter + 1);
 
     let result: { data: Uint8Array; bitLength: number };
     const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
-    if (sent.has(methodName) && hasMethodIndex(methodName)) {
+    const peerIdx = this.peerIndices.get(session.id)?.get(methodName);
+    if (peerIdx !== undefined) {
+      result = encodeRpcSubsequent({ ...opts, methodIndex: peerIdx });
+    } else if (hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent(opts);
     } else {
       result = encodeRpcFirstUse(opts);
-      if (hasMethodIndex(methodName)) sent.add(methodName);
     }
 
     this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED, result.bitLength);
   }
 
   private handleMessage(session: ClientSession, msg: IncomingMessage): void {
-    if (msg.payload[0] !== 0x1b) return;
+    const msgId = msg.payload[0];
+    if (msgId === MSG_ID_BATCH_INDEX) {
+      this.handleBatchIndex(session, msg);
+      return;
+    }
+    if (msgId !== 0x1b) return;
 
     if (msg.reliability === Reliability.UNRELIABLE_SEQUENCED) {
       this.handleStateSync(session, msg);
@@ -260,13 +267,27 @@ export class UnityServer {
       const queue = this.rpcReceivedFirstUse.get(session.id) ?? [];
       queue.push(decoded.methodName);
       this.rpcReceivedFirstUse.set(session.id, queue);
-    } else if (!decoded.firstUse && decoded.methodIndex !== undefined &&
-               decoded.methodName.startsWith('unknown_0x')) {
-      const queue = this.rpcReceivedFirstUse.get(session.id);
-      if (queue && queue.length > 0) {
-        const pending = queue.shift()!;
-        learnMethodIndex(pending, decoded.methodIndex);
-        decoded.methodName = pending;
+
+      if (!this.ourIndices.has(decoded.methodName)) {
+        const idx = this.nextOurIndex;
+        this.nextOurIndex += 2;
+        this.ourIndices.set(decoded.methodName, idx);
+        this.ourIndexReverse.set(idx, decoded.methodName);
+      }
+      const ourIdx = this.ourIndices.get(decoded.methodName)!;
+      const batch = encodeBatchIndex(decoded.methodName, ourIdx);
+      this.raknet.sendTo(session, batch.data, Reliability.UNRELIABLE, batch.bitLength);
+    } else if (!decoded.firstUse && decoded.methodIndex !== undefined) {
+      const resolved = this.ourIndexReverse.get(decoded.methodIndex);
+      if (resolved) {
+        decoded.methodName = resolved;
+      } else if (decoded.methodName.startsWith('unknown_0x')) {
+        const queue = this.rpcReceivedFirstUse.get(session.id);
+        if (queue && queue.length > 0) {
+          const pending = queue.shift()!;
+          learnMethodIndex(pending, decoded.methodIndex);
+          decoded.methodName = pending;
+        }
       }
     }
 
@@ -275,6 +296,18 @@ export class UnityServer {
     if (handler) {
       handler(session, ...decoded.params);
     }
+  }
+
+  private handleBatchIndex(session: ClientSession, msg: IncomingMessage): void {
+    const decoded = decodeBatchIndex(msg.payload);
+    if (!decoded || !decoded.methodName) return;
+
+    let peerMap = this.peerIndices.get(session.id);
+    if (!peerMap) {
+      peerMap = new Map();
+      this.peerIndices.set(session.id, peerMap);
+    }
+    peerMap.set(decoded.methodName, decoded.methodIndex);
   }
 
   private handleStateSync(session: ClientSession, msg: IncomingMessage): void {

@@ -16,6 +16,8 @@ from .unity_protocol import (
     decode_rpc, decode_state_sync, encode_state_sync,
     encode_delta_state_sync,
     METHOD_SIGNATURES, is_rpc,
+    MSG_ID_BATCH_INDEX, encode_batch_index, decode_batch_index,
+    INDEX_TO_METHOD,
 )
 from .bitstream import BitStream
 
@@ -31,8 +33,11 @@ class UnityServer:
         self._rpc_handlers = {}
         self._connect_handler = None
         self._disconnect_handler = None
-        self._rpc_sent_methods = {}  # addr -> set of method names
         self._rpc_counters = {}  # addr -> counter
+        self._peer_indices = {}  # addr -> {method_name: index}
+        self._our_indices = {}  # method_name -> our assigned index
+        self._our_index_reverse = {}  # our index -> method_name
+        self._next_our_index = 2
         self._sync_timestamp = 0
         self._view_groups = {}  # view_id -> group (default 0)
         self._send_groups = {}  # addr -> set of disabled group numbers
@@ -55,8 +60,8 @@ class UnityServer:
     def on_connect(self, handler):
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
-            self._rpc_sent_methods[addr] = set(METHOD_SIGNATURES.keys())
             self._rpc_counters[addr] = 0
+            self._peer_indices[addr] = {}
             self._send_groups[addr] = set()
             self._recv_groups[addr] = set()
             self._allocated_views[addr] = []
@@ -67,8 +72,8 @@ class UnityServer:
     def on_disconnect(self, handler):
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
-            self._rpc_sent_methods.pop(addr, None)
             self._rpc_counters.pop(addr, None)
+            self._peer_indices.pop(addr, None)
             self._send_groups.pop(addr, None)
             self._recv_groups.pop(addr, None)
             for vid in self._allocated_views.pop(addr, []):
@@ -223,7 +228,9 @@ class UnityServer:
         """Poll for incoming messages. Dispatches to registered handlers."""
         messages = self._raknet.poll(timeout)
         for addr, msg_id, payload, reliability, bit_length in messages:
-            if msg_id == ID_UNITY_RPC_OR_SYNC:
+            if msg_id == MSG_ID_BATCH_INDEX:
+                self._handle_batch_index(addr, payload)
+            elif msg_id == ID_UNITY_RPC_OR_SYNC:
                 if reliability == Reliability.UNRELIABLE_SEQUENCED:
                     pass  # state sync from client (not typical)
                 elif reliability == Reliability.RELIABLE_ORDERED:
@@ -244,22 +251,20 @@ class UnityServer:
 
     def _send_rpc_to(self, addr, method_name, params, view_id, mode,
                      target_view, relay=False):
-        if addr not in self._rpc_sent_methods:
-            self._rpc_sent_methods[addr] = set()
         if addr not in self._rpc_counters:
             self._rpc_counters[addr] = 0
 
         counter = self._rpc_counters[addr]
         self._rpc_counters[addr] += 1
 
-        sent = self._rpc_sent_methods[addr]
-        if method_name not in sent:
-            payload, bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode,
-                target_view=target_view, relay=relay)
-            sent.add(method_name)
-        else:
+        peer_idx = self._peer_indices.get(addr, {}).get(method_name)
+        if peer_idx is not None:
             payload, bits = encode_rpc_subsequent(
+                method_name, params, view_id, counter, mode,
+                target_view=target_view, relay=relay,
+                method_index=peer_idx)
+        else:
+            payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, counter, mode,
                 target_view=target_view, relay=relay)
 
@@ -273,6 +278,34 @@ class UnityServer:
             log.warning("Failed to decode RPC from %s (%d bytes)", addr,
                         len(payload), exc_info=True)
             return
+
+        if result.get('first_use'):
+            method = result.get('method_name', '')
+            if method and method != 'unknown':
+                if method not in self._our_indices:
+                    idx = self._next_our_index
+                    self._next_our_index += 2
+                    self._our_indices[method] = idx
+                    self._our_index_reverse[idx] = method
+                    INDEX_TO_METHOD[idx] = method
+                our_idx = self._our_indices[method]
+                batch_payload, batch_bits = encode_batch_index(method, our_idx)
+                self._raknet.send_to(addr, batch_payload,
+                                     Reliability.UNRELIABLE,
+                                     bit_length=batch_bits)
+        else:
+            method_name = result.get('method_name', '')
+            if method_name.startswith('unknown_0x'):
+                method_idx_str = method_name[len('unknown_0x'):]
+                try:
+                    method_idx = int(method_idx_str, 16)
+                except ValueError:
+                    method_idx = None
+                if method_idx is not None:
+                    resolved = self._our_index_reverse.get(method_idx)
+                    if resolved:
+                        result['method_name'] = resolved
+
         view_id = result.get('view_id', 0)
         if not self._is_recv_enabled(addr, view_id):
             return
@@ -281,3 +314,11 @@ class UnityServer:
         if handler:
             params = result.get('params', [])
             handler(addr, *params)
+
+    def _handle_batch_index(self, addr, payload):
+        decoded = decode_batch_index(payload)
+        if not decoded or not decoded.get('method_name'):
+            return
+        if addr not in self._peer_indices:
+            self._peer_indices[addr] = {}
+        self._peer_indices[addr][decoded['method_name']] = decoded['method_index']

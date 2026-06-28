@@ -298,16 +298,20 @@ class PeerTestRunner:
         mode = MODE_MAP.get(step.get('mode', 'Server'), RPCMode.Server)
         view_id = step.get('viewId', 1)
 
+        target_view = step.get('targetView', 0x2000)
+
         if sender == 'server':
             target_client = step.get('target', client_name)
             addr = self._client_addrs.get(target_client)
             if addr and self.server:
                 self.server.send_rpc(method, params, target=addr,
-                                     view_id=view_id, mode=mode)
+                                     view_id=view_id, mode=mode,
+                                     target_view=target_view)
         else:
             client = self.clients.get(client_name)
             if client:
-                client.send_rpc(method, params, view_id=view_id, mode=mode)
+                client.send_rpc(method, params, view_id=view_id, mode=mode,
+                                target_view=target_view)
                 for _ in range(5):
                     client.poll(0.02)
 

@@ -18,6 +18,7 @@ class RPCMode(IntEnum):
 
 
 MSG_ID_RPC = 0x1B
+MSG_ID_BATCH_INDEX = 0x07
 MAX_BYTES_PARAM_SIZE = 1_048_576
 
 
@@ -321,9 +322,10 @@ def _resolve_target_view(tv):
 
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
                           mode=RPCMode.Server, *, target_view,
-                          relay=False):
+                          relay=False, method_index=None):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
-    method_index = METHOD_INDEX_MAP.get(method_name)
+    if method_index is None:
+        method_index = METHOD_INDEX_MAP.get(method_name)
     if method_index is None:
         raise ValueError(f"Unknown method for subsequent encoding: {method_name}")
 
@@ -565,6 +567,52 @@ def is_rpc(payload):
     marker (0x0b) for RPCs, or the state sync flags byte (0x80/0x7f).
     """
     return len(payload) >= 10 and payload[9] == 0x0b
+
+
+def encode_batch_index(method_name, method_index):
+    """Encode an RPC Batch Index message (msg_id 0x07).
+
+    Returns (payload_bytes, bit_length).
+    """
+    class_guid, method_hash = get_method_id(method_name)
+    method_id_bits = (len(class_guid) + len(method_hash)) * 8
+
+    bs = BitStream()
+    bs.write_u8(MSG_ID_BATCH_INDEX)
+    bs.write_u32_be(method_id_bits // 2)
+    bs.write_bit(0)
+    bs.write_bytes(class_guid)
+    bs.write_bytes(method_hash)
+    bs.write_bits(method_index, 7)
+    while bs.bit_length % 8 != 0:
+        bs.write_bit(0)
+
+    return bs.to_bytes(), bs.bit_length
+
+
+def decode_batch_index(payload):
+    """Decode an RPC Batch Index message (msg_id 0x07).
+
+    Returns dict with 'method_name' and 'method_index', or None.
+    """
+    if len(payload) < 6 or payload[0] != MSG_ID_BATCH_INDEX:
+        return None
+
+    bs = BitStream(payload)
+    bs.read_u8()  # msg_id
+    half_bits = bs.read_u32_be()
+    method_id_bits = half_bits * 2
+    hash_bytes = method_id_bits // 8 - 6
+    if hash_bytes < 0:
+        return None
+
+    bs.read_bit()  # flag (always 0)
+    bs.read_bytes(6)  # class_guid
+    method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
+    method_index = bs.read_bits(7)
+
+    method_name = lookup_method_by_hash(method_hash.hex())
+    return {'method_name': method_name, 'method_index': method_index}
 
 
 # ── Network.Instantiate ──

@@ -37,6 +37,7 @@ export const RPC_MODE_FROM_NAME: Record<string, RpcMode> = {
 };
 
 const MSG_ID_RPC = 0x1b;
+export const MSG_ID_BATCH_INDEX = 0x07;
 const MAX_BYTES_PARAM_SIZE = 1_048_576;
 export const INTERNAL_RPC_CONSTANT = 0x0000;
 
@@ -163,6 +164,8 @@ export interface RpcEncodeOptions {
   /** Which NetworkView receives this RPC. Accepts a ViewId or a raw 16-bit constant. */
   targetView: ViewId | number;
   relay?: boolean;
+  /** Explicit method index for subsequent-use encoding. Overrides global lookup. */
+  methodIndex?: number;
 }
 
 function resolveTargetView(tv: ViewId | number): number {
@@ -174,7 +177,7 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   data: Uint8Array;
   bitLength: number;
 } {
-  const methodIndex = METHOD_INDEX_MAP.get(opts.methodName);
+  const methodIndex = opts.methodIndex ?? METHOD_INDEX_MAP.get(opts.methodName);
   if (methodIndex === undefined) {
     throw new Error(`Unknown method for subsequent encoding: ${opts.methodName}`);
   }
@@ -451,4 +454,55 @@ function bytesToHex(bytes: Uint8Array): string {
     hex += (bytes[i] ?? 0).toString(16).padStart(2, '0');
   }
   return hex;
+}
+
+/** Encode an RPC Batch Index message (msg_id 0x07). */
+export function encodeBatchIndex(
+  methodName: string,
+  methodIndex: number,
+): { data: Uint8Array; bitLength: number } {
+  const { classGuid, methodHash } = getMethodId(methodName);
+  const methodIdBytes = classGuid.length + methodHash.length;
+  const methodIdBits = methodIdBytes * 8;
+
+  const bs = new BitStream();
+  bs.writeU8(MSG_ID_BATCH_INDEX);
+  bs.writeU32BE(methodIdBits / 2);
+  bs.writeBit(0); // flag
+  bs.writeBytes(classGuid);
+  bs.writeBytes(methodHash);
+  bs.writeBits(methodIndex, 7);
+  // pad to byte boundary
+  while (bs.pos % 8 !== 0) {
+    bs.writeBit(0);
+  }
+
+  return { data: bs.toBytes(), bitLength: bs.pos };
+}
+
+export interface DecodedBatchIndex {
+  methodName: string | null;
+  methodIndex: number;
+}
+
+/** Decode an RPC Batch Index message (msg_id 0x07). */
+export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null {
+  if (payload.length < 6 || payload[0] !== MSG_ID_BATCH_INDEX) return null;
+
+  const bs = new BitStream(payload);
+  bs.readU8(); // msg_id
+  const halfBits = bs.readU32BE();
+  const methodIdBits = halfBits * 2;
+  const hashBytes = methodIdBits / 8 - 6;
+  if (hashBytes < 0) return null;
+
+  bs.readBit(); // flag (always 0)
+  bs.readBytes(6); // classGuid (skip)
+  const methodHash = hashBytes > 0 ? bs.readBytes(hashBytes) : new Uint8Array(0);
+  const methodIndex = bs.readBits(7);
+
+  const hashHex = bytesToHex(methodHash);
+  const methodName = lookupMethodByHash(hashHex);
+
+  return { methodName, methodIndex };
 }
