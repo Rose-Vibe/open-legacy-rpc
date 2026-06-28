@@ -300,15 +300,15 @@ def test_16bit_counter_in_wire():
 GOLDEN_BATCH = {
     'rpc_int_0x60': {
         'hex': '07000000200649d93b6ad8ea2b60',
-        'bits': 112,
+        'bits': 110,
         'methodName': 'RPC_Int',
         'methodIndex': 0x60,
     },
-    'rpc_void_2': {
-        'hex': '07000000240649d93b6ad8aaf42382',
-        'bits': 120,
+    'rpc_void_4': {
+        'hex': '07000000240649d93b6ad8aaf42384',
+        'bits': 118,
         'methodName': 'RPC_Void',
-        'methodIndex': 2,
+        'methodIndex': 4,
     },
 }
 

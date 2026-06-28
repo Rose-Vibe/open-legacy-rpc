@@ -15,10 +15,10 @@ register_method_names([
 PRESET_TESTS = [
     {'methodName': 'RPC_Int', 'methodIndex': 0x60, 'desc': 'RPC_Int with Unity-style index'},
     {'methodName': 'RPC_Float', 'methodIndex': 4, 'desc': 'RPC_Float low index'},
-    {'methodName': 'RPC_Void', 'methodIndex': 2, 'desc': 'RPC_Void even index'},
-    {'methodName': 'RPC_String', 'methodIndex': 126, 'desc': 'Near-max 7-bit index'},
+    {'methodName': 'RPC_Void', 'methodIndex': 8, 'desc': 'RPC_Void stride-4 index'},
+    {'methodName': 'RPC_String', 'methodIndex': 124, 'desc': 'Near-max 5-bit index'},
     {'methodName': 'RPC_Alpha', 'methodIndex': 0, 'desc': 'Zero index'},
-    {'methodName': 'RPC_Int', 'methodIndex': 127, 'desc': 'Max 7-bit index'},
+    {'methodName': 'RPC_Int', 'methodIndex': 76, 'desc': 'Mid-range index'},
 ]
 
 METHODS = ['RPC_Int', 'RPC_Float', 'RPC_String', 'RPC_Void', 'RPC_Alpha',
@@ -61,7 +61,7 @@ def _generate_random(count, rng):
     tests = []
     for i in range(count):
         method = rng.choice(METHODS)
-        index = rng.randint(0, 127)
+        index = rng.randint(0, 31) * 4
         tests.append(_make_test(method, index,
                                 f"Random BATCH decode {i}", 'random'))
     return tests

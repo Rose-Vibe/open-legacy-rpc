@@ -37,7 +37,7 @@ class UnityServer:
         self._peer_indices = {}  # addr -> {method_name: index}
         self._our_indices = {}  # method_name -> our assigned index
         self._our_index_reverse = {}  # our index -> method_name
-        self._next_our_index = 2
+        self._next_our_index = 4
         self._sync_timestamp = 0
         self._view_groups = {}  # view_id -> group (default 0)
         self._send_groups = {}  # addr -> set of disabled group numbers
@@ -284,7 +284,7 @@ class UnityServer:
             if method and method != 'unknown':
                 if method not in self._our_indices:
                     idx = self._next_our_index
-                    self._next_our_index += 2
+                    self._next_our_index += 4
                     self._our_indices[method] = idx
                     self._our_index_reverse[idx] = method
                     INDEX_TO_METHOD[idx] = method

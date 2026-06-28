@@ -29,6 +29,10 @@ export interface UnityServerOptions {
   port: number;
   password?: string;
   viewIdStride?: number;
+  /** Send BATCH index responses when we receive first-use RPCs (default true). */
+  sendBatchIndices?: boolean;
+  /** Use peer-supplied BATCH indices for subsequent-use encoding (default true). */
+  usePeerBatchIndices?: boolean;
 }
 
 export interface StateSyncMessage extends DecodedStateSync {
@@ -47,9 +51,11 @@ export class UnityServer {
   private peerIndices = new Map<string, Map<string, number>>();
   private ourIndices = new Map<string, number>();
   private ourIndexReverse = new Map<number, string>();
-  private nextOurIndex = 2;
+  private nextOurIndex = 4;
   private syncTimestamp = 0;
   private deltaState = new Map<string, number[]>();
+  private readonly sendBatchIndices: boolean;
+  private readonly usePeerBatchIndices: boolean;
 
   constructor(socket: UdpSocket, options: UnityServerOptions) {
     const rakOpts: { port: number; password?: string; viewIdStride?: number } = {
@@ -58,6 +64,8 @@ export class UnityServer {
     if (options.password !== undefined) rakOpts.password = options.password;
     if (options.viewIdStride !== undefined) rakOpts.viewIdStride = options.viewIdStride;
     this.raknet = new RakNetServer(socket, rakOpts);
+    this.sendBatchIndices = options.sendBatchIndices ?? true;
+    this.usePeerBatchIndices = options.usePeerBatchIndices ?? true;
 
     this.raknet.onConnect((session) => {
       this.rpcCounters.set(session.id, 0);
@@ -228,7 +236,9 @@ export class UnityServer {
 
     let result: { data: Uint8Array; bitLength: number };
     const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
-    const peerIdx = this.peerIndices.get(session.id)?.get(methodName);
+    const peerIdx = this.usePeerBatchIndices
+      ? this.peerIndices.get(session.id)?.get(methodName)
+      : undefined;
     if (peerIdx !== undefined) {
       result = encodeRpcSubsequent({ ...opts, methodIndex: peerIdx });
     } else if (hasMethodIndex(methodName)) {
@@ -243,7 +253,9 @@ export class UnityServer {
   private handleMessage(session: ClientSession, msg: IncomingMessage): void {
     const msgId = msg.payload[0];
     if (msgId === MSG_ID_BATCH_INDEX) {
-      this.handleBatchIndex(session, msg);
+      if (this.usePeerBatchIndices) {
+        this.handleBatchIndex(session, msg);
+      }
       return;
     }
     if (msgId !== 0x1b) return;
@@ -270,13 +282,15 @@ export class UnityServer {
 
       if (!this.ourIndices.has(decoded.methodName)) {
         const idx = this.nextOurIndex;
-        this.nextOurIndex += 2;
+        this.nextOurIndex += 4;
         this.ourIndices.set(decoded.methodName, idx);
         this.ourIndexReverse.set(idx, decoded.methodName);
       }
-      const ourIdx = this.ourIndices.get(decoded.methodName)!;
-      const batch = encodeBatchIndex(decoded.methodName, ourIdx);
-      this.raknet.sendTo(session, batch.data, Reliability.UNRELIABLE, batch.bitLength);
+      if (this.sendBatchIndices) {
+        const ourIdx = this.ourIndices.get(decoded.methodName)!;
+        const batch = encodeBatchIndex(decoded.methodName, ourIdx);
+        this.raknet.sendTo(session, batch.data, Reliability.UNRELIABLE, batch.bitLength);
+      }
     } else if (!decoded.firstUse && decoded.methodIndex !== undefined) {
       const resolved = this.ourIndexReverse.get(decoded.methodIndex);
       if (resolved) {

@@ -42,10 +42,10 @@ describe('Batch Index (0x07)', () => {
 
   it('encode/decode round-trips for multiple methods', () => {
     const methods = [
-      ['RPC_Int', 2],
-      ['RPC_Float', 4],
-      ['RPC_String', 6],
-      ['RPC_Void', 8],
+      ['RPC_Int', 4],
+      ['RPC_Float', 8],
+      ['RPC_String', 12],
+      ['RPC_Void', 16],
     ] as const;
     for (const [name, idx] of methods) {
       const { data } = encodeBatchIndex(name, idx);
@@ -64,10 +64,10 @@ describe('Batch Index (0x07)', () => {
     expect(decodeBatchIndex(new Uint8Array([0x07, 0, 0]))).toBeNull();
   });
 
-  it('method_index 7-bit range works', () => {
-    const { data } = encodeBatchIndex('RPC_Int', 126);
+  it('method_index 5-bit range works', () => {
+    const { data } = encodeBatchIndex('RPC_Int', 124);
     const decoded = decodeBatchIndex(data);
-    expect(decoded!.methodIndex).toBe(126);
+    expect(decoded!.methodIndex).toBe(124);
   });
 });
 

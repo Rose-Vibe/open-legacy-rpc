@@ -586,11 +586,14 @@ The BitStream payload contains:
 |------------|-------|-------|
 | 0 | 1 | flag (observed: always 0) |
 | 1 | N | method_id (N = `method_id_bit_count`, same encoding as §3.3.2) |
-| 1+N | 7 | method_index (the sender of this message's own index for the method) |
-| 1+N+7 | pad | zero padding to byte boundary |
+| 1+N | 5 | method_index >> 2 (the sender's own index for the method, divided by 4) |
+| 1+N+5 | pad | zero padding to byte boundary |
 
-Total bit count: `1 + method_id_bit_count + 7`, rounded up to the
-next byte boundary.
+Total bit count: `1 + method_id_bit_count + 5`. The RakNet
+bit_length is set to this value (not rounded up); byte padding is
+cosmetic. The 5-bit field stores the method_index right-shifted by 2;
+the receiver left-shifts by 2 to recover the full index used in
+subsequent-use RPC encoding (§3.4, 7-bit field with `& 0xFE` mask).
 
 #### 3.8.2 Observed Examples
 

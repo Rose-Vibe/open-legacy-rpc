@@ -471,13 +471,15 @@ export function encodeBatchIndex(
   bs.writeBit(0); // flag
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
-  bs.writeBits(methodIndex, 7);
+  bs.writeBits(methodIndex >> 2, 5);
+
+  const totalBits = 8 + 32 + 1 + methodIdBits + 5;
   // pad to byte boundary
   while (bs.pos % 8 !== 0) {
     bs.writeBit(0);
   }
 
-  return { data: bs.toBytes(), bitLength: bs.pos };
+  return { data: bs.toBytes(), bitLength: totalBits };
 }
 
 export interface DecodedBatchIndex {
@@ -499,7 +501,7 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
   bs.readBit(); // flag (always 0)
   bs.readBytes(6); // classGuid (skip)
   const methodHash = hashBytes > 0 ? bs.readBytes(hashBytes) : new Uint8Array(0);
-  const methodIndex = bs.readBits(7);
+  const methodIndex = bs.readBits(5) << 2;
 
   const hashHex = bytesToHex(methodHash);
   const methodName = lookupMethodByHash(hashHex);

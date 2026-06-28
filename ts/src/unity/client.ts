@@ -45,7 +45,7 @@ export class UnityClient {
   private serverIndices = new Map<string, number>();
   private ourIndices = new Map<string, number>();
   private ourIndexReverse = new Map<number, string>();
-  private nextOurIndex = 2;
+  private nextOurIndex = 4;
 
   constructor(socket: UdpSocket) {
     this.raknet = new RakNetClient(socket);
@@ -59,7 +59,7 @@ export class UnityClient {
       this.serverIndices.clear();
       this.ourIndices.clear();
       this.ourIndexReverse.clear();
-      this.nextOurIndex = 2;
+      this.nextOurIndex = 4;
       for (const h of this.disconnectHandlers) h('disconnected');
     });
 
@@ -197,7 +197,7 @@ export class UnityClient {
 
       if (!this.ourIndices.has(decoded.methodName)) {
         const idx = this.nextOurIndex;
-        this.nextOurIndex += 2;
+        this.nextOurIndex += 4;
         this.ourIndices.set(decoded.methodName, idx);
         this.ourIndexReverse.set(idx, decoded.methodName);
       }

@@ -583,11 +583,13 @@ def encode_batch_index(method_name, method_index):
     bs.write_bit(0)
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
-    bs.write_bits(method_index, 7)
+    bs.write_bits(method_index >> 2, 5)
+
+    total_bits = 8 + 32 + 1 + method_id_bits + 5
     while bs.bit_length % 8 != 0:
         bs.write_bit(0)
 
-    return bs.to_bytes(), bs.bit_length
+    return bs.to_bytes(), total_bits
 
 
 def decode_batch_index(payload):
@@ -609,7 +611,7 @@ def decode_batch_index(payload):
     bs.read_bit()  # flag (always 0)
     bs.read_bytes(6)  # class_guid
     method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
-    method_index = bs.read_bits(7)
+    method_index = bs.read_bits(5) << 2
 
     method_name = lookup_method_by_hash(method_hash.hex())
     return {'method_name': method_name, 'method_index': method_index}

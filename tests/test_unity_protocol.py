@@ -699,8 +699,8 @@ def test_first_use_remaining_bit_count():
 
 
 def test_batch_index_encode_decode_roundtrip():
-    methods = [('RPC_Int', 0x60), ('RPC_Float', 4), ('RPC_Void', 2),
-               ('RPC_String', 126), ('RPC_Alpha', 0), ('RPC_Int', 127)]
+    methods = [('RPC_Int', 0x60), ('RPC_Float', 4), ('RPC_Void', 8),
+               ('RPC_String', 124), ('RPC_Alpha', 0), ('RPC_Int', 76)]
     for name, idx in methods:
         data, bits = encode_batch_index(name, idx)
         assert data[0] == MSG_ID_BATCH_INDEX
