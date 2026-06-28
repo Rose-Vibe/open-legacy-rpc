@@ -178,8 +178,7 @@ describe('UnityServer', () => {
     const rpc = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 99 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -444,8 +443,7 @@ describe('UnityClient', () => {
     const rpc = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 77 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.All,
       targetView: 0x2000,
     });

@@ -31,17 +31,36 @@ network latency.
 See `docs/research/2026-06-28-timestamp-expansion-findings.md` for the
 full experimental evidence.
 
-## Root Cause (UPDATED after staggered experiment)
+## Root Cause (UPDATED after client-delay experiment)
 
 The original theory was that different upper bits caused a systematic
 error. This was **wrong** — Unity's expansion works correctly with
 arbitrary clock skew because 16-bit truncation of both wireCounter and
 clockDiff causes high bits to cancel in the subtraction.
 
-The ACTUAL root cause is: distance-server's ping/pong timestamps and
-RPC wire counter are on different time bases. The expansion only works
-when both use the same monotonic clock. If `clockDiff` is computed from
-one epoch and the wire counter from another, the cancellation breaks.
+### Critical Finding: Network.time = Client Process Uptime
+
+Experiment with 60-second client delay before connecting proved:
+- Unity's `Network.time` on the client = `clientProcessUptime / 1000`
+- `info.timestamp` also = `clientProcessUptime / 1000`
+- They are always consistent in standard Unity
+
+Server's `Network.time` was 62.099s while client's was 60.778s at the
+same moment — Unity does NOT sync `Network.time` between peers.
+
+### Why Distance Fails
+
+Distance's custom time sync RPC (`sendTimeSync`) provides a game-level
+time (~24s) that differs from Unity's `Network.time` (~950s for a client
+with long menu time). The game code compares `info.timestamp` against
+this custom time, producing the observed mismatch.
+
+The Unity bridge server "works" because it uses standard Unity
+`Network.time`, which always matches `info.timestamp`.
+
+No server-side fix exists within the 16-bit counter protocol — the gap
+between custom time (24s) and client process uptime (950s) exceeds the
+~32-second range of 16-bit arithmetic. The Harmony patch is the only fix.
 
 ## Plan
 

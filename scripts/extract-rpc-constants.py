@@ -113,7 +113,7 @@ def process_pcap(pcap_path):
                 'first_use': decoded['first_use'],
                 'constant': const,
                 'direction': direction,
-                'counter': decoded['rpc_counter'],
+                'counter': decoded['timestamp_ms'],
             })
 
     if not results:

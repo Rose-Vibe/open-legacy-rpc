@@ -149,11 +149,11 @@ def check_16bit_counter(rpc_entry, verbose=False):
     low = raw[8]
     wire_counter = ((high << 8) | low) >> 1
 
-    ok = wire_counter == decoded['rpc_counter']
+    ok = wire_counter == decoded['timestamp_ms']
     if verbose or not ok:
         label = 'PASS' if ok else 'FAIL'
         print(f"  [{label}] Fix 2 (16-bit counter): "
-              f"wire_counter={wire_counter} decoded={decoded['rpc_counter']} "
+              f"wire_counter={wire_counter} decoded={decoded['timestamp_ms']} "
               f"raw_bytes=[0x{high:02x}, 0x{low:02x}]")
     return ok
 
@@ -164,7 +164,7 @@ def check_counter_above_127(rpcs, verbose=False):
     for rpc in rpcs:
         decoded = rpc.get('decoded')
         if decoded:
-            max_counter = max(max_counter, decoded['rpc_counter'])
+            max_counter = max(max_counter, decoded['timestamp_ms'])
 
     ok = max_counter > 127
     label = 'PASS' if ok else 'FAIL'
@@ -314,7 +314,7 @@ def verify_roundtrip(rpc_entry, verbose=False):
         return None
 
     params = decoded.get('params', [])
-    counter = decoded['rpc_counter']
+    counter = decoded['timestamp_ms']
     view_id = decoded['view_id']
 
     rpc_mode_val = decoded['rpc_mode']

@@ -33,7 +33,7 @@ class UnityServer:
         self._rpc_handlers = {}
         self._connect_handler = None
         self._disconnect_handler = None
-        self._rpc_counters = {}  # addr -> counter
+        self._epoch = time.monotonic()
         self._peer_indices = {}  # addr -> {method_name: index}
         self._our_indices = {}  # method_name -> our assigned index
         self._our_index_reverse = {}  # our index -> method_name
@@ -60,7 +60,6 @@ class UnityServer:
     def on_connect(self, handler):
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
-            self._rpc_counters[addr] = 0
             self._peer_indices[addr] = {}
             self._send_groups[addr] = set()
             self._recv_groups[addr] = set()
@@ -72,7 +71,6 @@ class UnityServer:
     def on_disconnect(self, handler):
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
-            self._rpc_counters.pop(addr, None)
             self._peer_indices.pop(addr, None)
             self._send_groups.pop(addr, None)
             self._recv_groups.pop(addr, None)
@@ -251,21 +249,17 @@ class UnityServer:
 
     def _send_rpc_to(self, addr, method_name, params, view_id, mode,
                      target_view, relay=False):
-        if addr not in self._rpc_counters:
-            self._rpc_counters[addr] = 0
-
-        counter = self._rpc_counters[addr]
-        self._rpc_counters[addr] += 1
+        uptime_ms = int((time.monotonic() - self._epoch) * 1000)
 
         peer_idx = self._peer_indices.get(addr, {}).get(method_name)
         if peer_idx is not None:
             payload, bits = encode_rpc_subsequent(
-                method_name, params, view_id, counter, mode,
+                method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay,
                 method_index=peer_idx)
         else:
             payload, bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode,
+                method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay)
 
         self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED,

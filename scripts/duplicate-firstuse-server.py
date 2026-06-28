@@ -73,11 +73,11 @@ def send_rpc_raw(method_name, params, first_use, label):
     global rpc_counter
     if first_use:
         payload, bits = encode_rpc_first_use(
-            method_name, params, view_id=0, rpc_counter=rpc_counter,
+            method_name, params, view_id=0, timestamp_ms=rpc_counter,
             mode=RPCMode.Server, target_view=0x0002)
     else:
         payload, bits = encode_rpc_subsequent(
-            method_name, params, view_id=0, rpc_counter=rpc_counter,
+            method_name, params, view_id=0, timestamp_ms=rpc_counter,
             mode=RPCMode.Server, target_view=0x0002)
     log.info(f"  [{label}] Sending {method_name}({params[0]}) counter={rpc_counter} "
              f"{'first-use' if first_use else 'subsequent'} ({bits} bits)")

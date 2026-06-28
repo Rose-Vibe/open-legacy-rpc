@@ -320,7 +320,7 @@ def _resolve_target_view(tv):
     return rpc_view_constant(tv['scope'], tv['id'])
 
 
-def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
+def encode_rpc_subsequent(method_name, params, view_id=1, timestamp_ms=0,
                           mode=RPCMode.Server, *, target_view,
                           relay=False, method_index=None):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
@@ -342,12 +342,9 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     bs = BitStream()
     # msg_id
     bs.write_u8(MSG_ID_RPC)
-    # ViewID (48 bits)
-    bs.write_bytes(encode_view_id(view_id))
-    # Counter (16-bit): raw RakNetGetTimeMS() & 0xFFFF
-    counter16 = rpc_counter & 0xFFFF
-    bs.write_u8((counter16 >> 8) & 0xFF)
-    bs.write_u8(counter16 & 0xFF)
+    # u64 BE timestamp (senderRakNetGetTimeMS)
+    bs.write_u32_be((timestamp_ms >> 32) & 0xFFFFFFFF)
+    bs.write_u32_be(timestamp_ms & 0xFFFFFFFF)
     bs.write_u8(0x0b)
     # first_use = 0
     bs.write_bit(0)
@@ -375,7 +372,7 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     return bs.to_bytes(), total_bits
 
 
-def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
+def encode_rpc_first_use(method_name, params, view_id=1, timestamp_ms=0,
                          mode=RPCMode.Server, *, target_view,
                          relay=False):
     """Encode a first-use RPC (includes method name hash)."""
@@ -396,11 +393,9 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
 
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
-    bs.write_bytes(encode_view_id(view_id))
-    # Counter (16-bit): raw RakNetGetTimeMS() & 0xFFFF
-    counter16 = rpc_counter & 0xFFFF
-    bs.write_u8((counter16 >> 8) & 0xFF)
-    bs.write_u8(counter16 & 0xFF)
+    # u64 BE timestamp (senderRakNetGetTimeMS)
+    bs.write_u32_be((timestamp_ms >> 32) & 0xFFFFFFFF)
+    bs.write_u32_be(timestamp_ms & 0xFFFFFFFF)
     bs.write_u8(0x0b)
     bs.write_bit(1)
     bs.write_bits(0, 7)
@@ -437,10 +432,9 @@ def decode_rpc(payload, bit_length):
     result = {}
 
     result['msg_id'] = bs.read_u8()
-    result['view_id'] = decode_view_id_bits(bs)
-    counter_high = bs.read_u8()
-    counter_low = bs.read_u8()
-    result['rpc_counter'] = (counter_high << 8) | counter_low
+    ts_hi = bs.read_u32_be()
+    ts_lo = bs.read_u32_be()
+    result['timestamp_ms'] = (ts_hi << 32) | ts_lo
     bs.read_bits(8)  # 0x0b marker
     first_use = bs.read_bit()
     result['first_use'] = bool(first_use)

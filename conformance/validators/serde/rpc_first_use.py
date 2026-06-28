@@ -35,7 +35,7 @@ def validate(test_obj):
 
     data, bits = encode_rpc_first_use(
         inp['methodName'], params, view_id=view_id,
-        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
+        timestamp_ms=inp['timestampMs'], mode=mode, target_view=0x2000,
     )
 
     if 'dataHex' not in out:

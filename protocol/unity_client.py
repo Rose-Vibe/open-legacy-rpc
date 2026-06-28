@@ -28,7 +28,7 @@ class UnityClient:
         self._raknet = RakNetClient()
         self._rpc_handlers = {}
         self._state_sync_handlers = {}
-        self._rpc_counter = 0
+        self._epoch = time.monotonic()
         self._viewid_counter = 0
         self._server_indices = {}  # method_name -> server's index
         self._our_indices = {}  # method_name -> our assigned index
@@ -78,18 +78,17 @@ class UnityClient:
                  relay=False):
         """Send an RPC to the server."""
         params = params or []
-        counter = self._rpc_counter
-        self._rpc_counter += 1
+        uptime_ms = int((time.monotonic() - self._epoch) * 1000)
 
         server_idx = self._server_indices.get(method_name)
         if server_idx is not None:
             payload, bits = encode_rpc_subsequent(
-                method_name, params, view_id, counter, mode,
+                method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay,
                 method_index=server_idx)
         else:
             payload, bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode,
+                method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay)
 
         self._raknet.send_message(payload, Reliability.RELIABLE_ORDERED,

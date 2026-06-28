@@ -27,7 +27,7 @@ def _encode_from_preset(preset, counter):
             params.append(p['value'])
     mode = MODE_MAP[preset['mode']]
     data, bits = encode_rpc_subsequent(preset['name'], params, view_id=0,
-                                       rpc_counter=counter, mode=mode,
+                                       timestamp_ms=counter, mode=mode,
                                        target_view=0x2000)
     return data.hex(), bits
 
@@ -73,7 +73,7 @@ def _generate_random(count, rng):
         mode = MODE_MAP[rng.choice(RPC_MODES)]
         counter = rng.randint(0, 127)
         data, bits = encode_rpc_subsequent(method, params, view_id=0,
-                                           rpc_counter=counter, mode=mode,
+                                           timestamp_ms=counter, mode=mode,
                                            target_view=0x2000)
         tests.append({
             'testInfo': {

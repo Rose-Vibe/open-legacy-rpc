@@ -228,7 +228,6 @@ def test_disconnect_cleanup():
         assert len(disconnected) == 1
         assert server.get_allocated_views(addr1) == []
         assert addr1 not in server._peer_indices
-        assert addr1 not in server._rpc_counters
 
         # Connect second client — should get fresh state
         c2 = UnityClient()

@@ -65,7 +65,7 @@ log.info("Server started on port 7777, waiting for client...")
 def send_rpc(param_value, rpc_counter, label):
     """Send an RPC_Int with a specific rpc_counter value."""
     payload, bits = encode_rpc_first_use(
-        'RPC_Int', [param_value], view_id=0, rpc_counter=rpc_counter,
+        'RPC_Int', [param_value], view_id=0, timestamp_ms=rpc_counter,
         mode=RPCMode.Server, target_view=0x0002)
 
     # Verify the wire counter is what we expect

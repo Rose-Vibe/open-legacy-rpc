@@ -20,8 +20,8 @@ def validate(test_obj):
 
     if out.get('methodName') != expected.get('method_name'):
         failures.append(f"methodName: expected {expected.get('method_name')!r}, got {out.get('methodName')!r}")
-    if out.get('rpcCounter') != expected.get('rpc_counter'):
-        failures.append(f"rpcCounter: expected {expected.get('rpc_counter')}, got {out.get('rpcCounter')}")
+    if out.get('timestampMs') != expected.get('timestamp_ms'):
+        failures.append(f"timestampMs: expected {expected.get('timestamp_ms')}, got {out.get('timestampMs')}")
     exp_mode = expected.get('rpc_mode')
     if exp_mode is not None:
         exp_mode_name = exp_mode.name

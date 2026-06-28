@@ -28,7 +28,7 @@ def _encode(inp):
     view_id = vid['id'] if vid['scope'] == 'scene' else (0x100000000 | vid['id'])
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_first_use(inp['methodName'], params, view_id=view_id,
-                                       rpc_counter=inp['rpcCounter'], mode=mode,
+                                       timestamp_ms=inp['timestampMs'], mode=mode,
                                        target_view=0x2000)
     return data.hex(), bits
 
@@ -45,7 +45,7 @@ def _generate_basic():
         inp = {
             'methodName': preset['name'],
             'viewId': {'scope': 'scene', 'id': 0},
-            'rpcCounter': 0,
+            'timestampMs': 0,
             'rpcMode': preset['mode'],
             'params': preset['params'],
         }
@@ -72,7 +72,7 @@ def _generate_random(count, rng):
         params_json = [_random_param(rng, pt) for pt, _ in sig]
         inp = {
             'methodName': method, 'viewId': {'scope': 'scene', 'id': 0},
-            'rpcCounter': 0, 'rpcMode': rng.choice(RPC_MODES), 'params': params_json,
+            'timestampMs': 0, 'rpcMode': rng.choice(RPC_MODES), 'params': params_json,
         }
         data_hex, bit_length = _encode(inp)
         tests.append({

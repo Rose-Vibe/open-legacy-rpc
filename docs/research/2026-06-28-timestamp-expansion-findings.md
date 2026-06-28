@@ -268,12 +268,81 @@ needed beyond the ×2 bug fix. The unified epoch (`epochNs`) passed from
 `UnityServer` → `RakNetServer` → `ReliabilityLayer` ensures the RPC
 counter and ping/pong use the same time base.
 
-## Remaining Questions
+## Client-Delay Experiment: Network.time = Client Process Uptime
 
-1. Why is `realtimeSinceStartup` (~23s) different from MYSTERY_CLOCK
-   (~983s) in the Distance tests? Is it the Steam container's effect
-   on RakNet's `initialTime`?
-2. What exactly is wrong with distance-server's ping/pong? Is the
-   epoch mismatch in their `getTimestampMs()` vs RPC counter?
-3. Does MYSTERY_CLOCK truly persist across game process restarts, or was
-   this an artifact of testing within the same time window?
+### Setup
+
+Server started immediately. Client started but waited 60 seconds before
+calling `Network.Connect()` (simulating menu/lobby idle time). Server sent
+5 buffered RPCs + 10 live RPCs using TimestampExpansionExperiment.
+
+### Results
+
+At connect time:
+- Server `realtimeSinceStartup`: 62.09s, `Network.time`: 62.099s
+- Client `realtimeSinceStartup`: 60.76s, `Network.time`: 60.778s
+
+RPC timestamps on client:
+```
+Phase 1 (buffered):   timestamp=60.768  Network.time=60.778
+Phase 2 (live):
+  RPC 101: timestamp=61.597  Network.time=61.606
+  RPC 102: timestamp=62.425  Network.time=62.434
+  ...
+  RPC 110: timestamp=69.052  Network.time=69.060
+```
+
+### Key Finding: Network.time Is NOT Synced
+
+Unity's `Network.time` on the **client** equals `clientRakNetTimeMS / 1000`
+(client process uptime). It is NOT synced to the server's `Network.time`.
+
+Evidence: server's `Network.time` was 62.099s while client's was 60.778s
+at the same moment. These differ by ~1.3s — the time between server start
+and client start (the client waited 60s, but the server started ~1.3s before
+the client process launched).
+
+`info.timestamp` (60.768) ≈ client's `Network.time` (60.778) ≈ client's
+`realtimeSinceStartup` (60.761). All three track client process uptime.
+
+### Why distance-server Timestamps Appear Wrong
+
+The distance-server's `info.timestamp ≈ 941` while its game-level "network
+time" ≈ 24 is NOT because `info.timestamp` is wrong. It's because:
+
+1. In standard Unity, `Network.time` = `clientProcessUptime / 1000`
+2. `info.timestamp` also = `clientProcessUptime / 1000`
+3. They always match → game code using `Network.time - info.timestamp`
+   for delay calculation works correctly
+
+But Distance overrides this with a custom time sync RPC (`sendTimeSync`)
+that provides the server's game time (~24s) as the authoritative clock.
+The game code then compares `info.timestamp` (941s) against this custom
+time (24s), which are on completely different time bases.
+
+The Unity bridge server "works" because it uses standard Unity `Network.time`
+(which matches `info.timestamp`), not a custom time sync.
+
+### Solution
+
+No server-side fix exists within the 16-bit counter protocol. The counter
+can only encode values within ~32 seconds of the client's current time.
+The distance-server's custom time base (~24s) is ~917 seconds away from
+`clientProcessUptime` (~941s), far beyond what 16-bit arithmetic can bridge.
+
+The distance-server's existing Harmony patch (bypassing `info.timestamp`)
+is the correct and only approach.
+
+Our library implementation is correct:
+- Wire counter uses `uptimeMs & 0xFFFF` (same clock as ping/pong)
+- 16-bit expansion + clockDiff cancellation produces correct timestamps
+- `info.timestamp` matches Unity's `Network.time` on the client
+
+### MYSTERY_CLOCK Resolved
+
+The "MYSTERY_CLOCK" (~983s for a client with `realtimeSinceStartup` ~23s)
+is explained by the client process having been running in menus for ~983
+seconds before connecting. Under Steam's pressure-vessel container,
+`gettimeofday()` baseline or RakNet's `initialTime` may be set at container
+start rather than game process start, making `RakNetGetTimeMS()` higher
+than `realtimeSinceStartup`.

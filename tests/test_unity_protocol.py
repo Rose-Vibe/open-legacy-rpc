@@ -134,7 +134,7 @@ def test_rpc_modes():
 
 def test_first_use_metadata_remaining_count():
     """First-use metadata contains correct remaining_bit_count."""
-    payload, bits = encode_rpc_first_use('RPC_Int', [42], view_id=0, rpc_counter=0, target_view=0x2000)
+    payload, bits = encode_rpc_first_use('RPC_Int', [42], view_id=0, timestamp_ms=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in payload)
 
     # Method hash for RPC_Int is 'd456' (2 bytes), method_id_bits = (6+2)*8 = 64
@@ -511,7 +511,7 @@ def test_instantiate_group_flags_matches_capture():
 
 def test_invalid_rpc_mode_does_not_crash():
     """Decoding an RPC with an invalid RPCMode value should not crash."""
-    data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=0,
+    data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, timestamp_ms=0,
                                            target_view=0x2000,
                                        mode=RPCMode.Server)
     # Tamper with the mode nibble at the known bit position (136)
@@ -526,39 +526,39 @@ def test_invalid_rpc_mode_does_not_crash():
 
 def test_encode_params_zero_values_not_treated_as_missing():
     """Encoding int=0, float=0.0, string='' should produce real values, not defaults."""
-    data_int, bits_int = encode_rpc_subsequent('RPC_Int', [0], view_id=1, rpc_counter=0, target_view=0x2000)
+    data_int, bits_int = encode_rpc_subsequent('RPC_Int', [0], view_id=1, timestamp_ms=0, target_view=0x2000)
     decoded_int = decode_rpc(data_int, bits_int)
     assert decoded_int['params'][0] == 0
 
-    data_float, bits_float = encode_rpc_subsequent('RPC_Float', [0.0], view_id=1, rpc_counter=0, target_view=0x2000)
+    data_float, bits_float = encode_rpc_subsequent('RPC_Float', [0.0], view_id=1, timestamp_ms=0, target_view=0x2000)
     decoded_float = decode_rpc(data_float, bits_float)
     assert decoded_float['params'][0] == 0.0
 
-    data_str, bits_str = encode_rpc_subsequent('RPC_String', [''], view_id=1, rpc_counter=0, target_view=0x2000)
+    data_str, bits_str = encode_rpc_subsequent('RPC_String', [''], view_id=1, timestamp_ms=0, target_view=0x2000)
     decoded_str = decode_rpc(data_str, bits_str)
     assert decoded_str['params'][0] == ''
 
-    data_bytes, bits_bytes = encode_rpc_subsequent('RPC_Bytes', [b''], view_id=1, rpc_counter=0, target_view=0x2000)
+    data_bytes, bits_bytes = encode_rpc_subsequent('RPC_Bytes', [b''], view_id=1, timestamp_ms=0, target_view=0x2000)
     decoded_bytes = decode_rpc(data_bytes, bits_bytes)
     assert decoded_bytes['params'][0] == b''
 
 
-def test_rpc_counter_overflow_wraps_at_65536():
-    """RPC counter wraps at 65536 (16-bit field, raw ms)."""
-    for counter in [0, 100, 32767, 32768, 50000, 65535, 65536]:
-        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
+def test_u64_timestamp_roundtrip():
+    """u64 timestamp survives encode/decode including values > 65535."""
+    for ts in [0, 100, 32767, 32768, 50000, 65535, 65536, 100000, 200000, 955000]:
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, timestamp_ms=ts, target_view=0x2000)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 65536, \
-            f"counter={counter}: expected {counter % 65536}, got {decoded['rpc_counter']}"
+        assert decoded['timestamp_ms'] == ts, \
+            f"timestamp={ts}: expected {ts}, got {decoded['timestamp_ms']}"
 
 
-def test_rpc_counter_overflow_first_use():
-    """First-use encoding also wraps counter at 65536."""
-    for counter in [0, 127, 128, 32767, 32768, 50000, 65536]:
-        data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
+def test_u64_timestamp_first_use():
+    """First-use encoding also preserves full u64 timestamp."""
+    for ts in [0, 127, 128, 32767, 32768, 50000, 65536, 200000]:
+        data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, timestamp_ms=ts, target_view=0x2000)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 65536, \
-            f"counter={counter}: expected {counter % 65536}, got {decoded['rpc_counter']}"
+        assert decoded['timestamp_ms'] == ts, \
+            f"timestamp={ts}: expected {ts}, got {decoded['timestamp_ms']}"
 
 
 def test_float_denorm_roundtrip():
@@ -664,18 +664,18 @@ def test_register_method_tags_bulk():
         METHOD_TAG_MAP.pop('RPC_Beta', None)
 
 
-def test_16bit_counter_high_values():
-    """Counter values up to 32767 survive encode→decode roundtrip."""
-    for counter in [255, 256, 1000, 16383, 32767]:
-        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
+def test_u64_timestamp_high_values():
+    """Large timestamp values survive encode→decode roundtrip."""
+    for ts in [255, 256, 1000, 16383, 32767, 100000, 500000]:
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, timestamp_ms=ts, target_view=0x2000)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter, \
-            f"counter={counter}: got {decoded['rpc_counter']}"
+        assert decoded['timestamp_ms'] == ts, \
+            f"timestamp={ts}: got {decoded['timestamp_ms']}"
 
 
 def test_subsequent_remaining_bit_count():
     """Subsequent-use remaining count is total_bits - 121."""
-    data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, rpc_counter=0, target_view=0x2000)
+    data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, timestamp_ms=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in data)
     remaining_bits = all_bits[104:120]
     remaining = int(remaining_bits, 2)
@@ -685,7 +685,7 @@ def test_subsequent_remaining_bit_count():
 
 def test_first_use_remaining_bit_count():
     """First-use remaining count is param_bits + 19 + target_bits."""
-    data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=0, target_view=0x2000)
+    data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, timestamp_ms=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in data)
     guid, hash_val = compute_method_id('RPC_Int')
     method_id_bits = (len(guid) + len(hash_val)) * 8

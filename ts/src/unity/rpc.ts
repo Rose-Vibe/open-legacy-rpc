@@ -1,6 +1,6 @@
 import { BitStream } from '../bitstream.js';
 import { encodeStringForWire, decodeString } from '../huffman.js';
-import { encodeViewId, rpcViewConstantFromVid } from './view-id.js';
+import { rpcViewConstantFromVid } from './view-id.js';
 import type { ViewId } from './view-id.js';
 import {
   getMethodId,
@@ -158,8 +158,7 @@ export function registerMethodIndices(indices: Record<string, number>): void {
 export interface RpcEncodeOptions {
   methodName: string;
   params: RpcParam[];
-  viewId: number;
-  rpcCounter: number;
+  timestampMs: number;
   mode: RpcMode;
   /** Which NetworkView receives this RPC. Accepts a ViewId or a raw 16-bit constant. */
   targetView: ViewId | number;
@@ -193,10 +192,8 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
-  bs.writeBytes(encodeViewId(opts.viewId));
-  const counter16 = opts.rpcCounter & 0xffff;
-  bs.writeU8((counter16 >> 8) & 0xff);
-  bs.writeU8(counter16 & 0xff);
+  bs.writeU32BE((opts.timestampMs / 0x100000000) >>> 0);
+  bs.writeU32BE(opts.timestampMs >>> 0);
   bs.writeU8(0x0b);
   bs.writeBit(0);
   bs.writeBits(methodIndex, 7);
@@ -239,10 +236,8 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
-  bs.writeBytes(encodeViewId(opts.viewId));
-  const counter16 = opts.rpcCounter & 0xffff;
-  bs.writeU8((counter16 >> 8) & 0xff);
-  bs.writeU8(counter16 & 0xff);
+  bs.writeU32BE((opts.timestampMs / 0x100000000) >>> 0);
+  bs.writeU32BE(opts.timestampMs >>> 0);
   bs.writeU8(0x0b);
   bs.writeBit(1);
   bs.writeBits(0, 7);
@@ -273,10 +268,9 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
 
 export interface DecodedRpc {
   methodName: string;
-  rpcCounter: number;
+  timestampMs: number;
   rpcMode: string;
   firstUse: boolean;
-  viewId: number;
   params: unknown[];
   classGuid?: string;
   methodHash?: string;
@@ -289,22 +283,17 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const bs = new BitStream(payload, bitLength);
 
   bs.readU8(); // msg_id
-  const viewIdHi = bs.readBits(16);
-  const viewIdMid = bs.readBits(16);
-  const viewIdLo = bs.readBits(16);
-  const viewId = viewIdHi * 0x100000000 + viewIdMid * 0x10000 + viewIdLo;
-  const counterHigh = bs.readU8();
-  const counterLow = bs.readU8();
-  const rpcCounter = (counterHigh << 8) | counterLow;
+  const tsHi = bs.readU32BE();
+  const tsLo = bs.readU32BE();
+  const timestampMs = tsHi * 0x100000000 + tsLo;
   bs.readBits(8); // 0x0b marker
   const firstUse = bs.readBit() === 1;
 
   const result: DecodedRpc = {
     methodName: '',
-    rpcCounter,
+    timestampMs,
     rpcMode: '',
     firstUse,
-    viewId,
     params: [],
   };
 

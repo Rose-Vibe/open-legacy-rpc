@@ -186,8 +186,7 @@ def decode_rpc_layer(payload, bit_length, config):
         'rawHex': payload.hex(),
         'msgId': MSG_ID_RPC,
         'variant': 'first_use' if decoded.get('first_use') else 'subsequent_use',
-        'viewId': decoded.get('view_id'),
-        'rpcCounter': decoded.get('rpc_counter'),
+        'timestampMs': decoded.get('timestamp_ms'),
         'rpcMode': RPCMode(decoded['rpc_mode']).name if isinstance(decoded.get('rpc_mode'), (int, RPCMode)) else str(decoded.get('rpc_mode', '')),
         'methodName': method_name,
     }
@@ -224,10 +223,6 @@ def decode_rpc_layer(payload, bit_length, config):
             'rawHex': remaining,
         }] if remaining else []
 
-    view_name = _view_name(decoded.get('view_id'), config)
-    if view_name:
-        result['viewName'] = view_name
-
     return result
 
 
@@ -261,10 +256,9 @@ def _partial_rpc(payload, bit_length):
     }
     try:
         bs.read_u8()  # msg_id
-        bs.read_bits(48)  # view_id (raw)
-        counter_high = bs.read_u8()
-        counter_low = bs.read_u8()
-        result['rpcCounter'] = ((counter_high << 8) | counter_low) >> 1
+        ts_hi = bs.read_bits(32)
+        ts_lo = bs.read_bits(32)
+        result['timestampMs'] = (ts_hi << 32) | ts_lo
         bs.read_bits(8)  # marker
         first_use = bs.read_bit()
         result['variant'] = 'first_use' if first_use else 'subsequent_use'

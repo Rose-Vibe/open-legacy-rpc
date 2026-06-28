@@ -4,8 +4,8 @@ Decode Unity legacy networking RPC wire format from pcap captures.
 
 RPC Message Format (msg_id = 0x1b):
   bits 0-7:     msg_id (0x1b)
-  bits 8-55:    NetworkViewID (48 bits, compressed — all zeros when viewID is minimal)
-  bits 56-79:   invocation metadata (counter, timing, constant trailer 0x0b)
+  bits 8-71:    u64 BE senderRakNetGetTimeMS (server uptime in ms)
+  bits 72-79:   constant marker 0x0b
   bit 80:       first_use flag (1=includes method name hash, 0=uses cached index)
 
   If first_use=1:
@@ -168,11 +168,10 @@ def decode_rpc(payload, bit_length):
     result = {}
 
     result['msg_id'] = br.read_u8()
-    result['view_id_raw'] = br.read_bits(48)
-    result['invocation_meta'] = br.read_bits(24)
-
-    counter_byte = (result['invocation_meta'] >> 16) & 0xFF
-    result['rpc_counter'] = counter_byte
+    ts_hi = br.read_bits(32)
+    ts_lo = br.read_bits(32)
+    result['timestamp_ms'] = (ts_hi << 32) | ts_lo
+    br.read_bits(8)  # 0x0b marker
 
     first_use = br.read_bit()
     result['first_use'] = bool(first_use)
@@ -370,7 +369,7 @@ def main():
         print('=== %s ===' % exp_name)
         for i, r in enumerate(rpcs):
             parts = ['  RPC %d: %s %dbits' % (i + 1, r['direction'], r['bit_length'])]
-            parts.append('counter=%d' % r.get('rpc_counter', -1))
+            parts.append('ts=%d' % r.get('timestamp_ms', -1))
 
             if r.get('first_use'):
                 parts.append('FIRST_USE')

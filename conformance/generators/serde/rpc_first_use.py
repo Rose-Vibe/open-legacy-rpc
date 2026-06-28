@@ -30,7 +30,7 @@ def _generate_basic():
             'input': {
                 'methodName': preset['name'],
                 'viewId': {'scope': 'scene', 'id': 0},
-                'rpcCounter': 0,
+                'timestampMs': 0,
                 'rpcMode': preset['mode'],
                 'params': preset['params'],
             },
@@ -56,7 +56,7 @@ def _generate_random(count, rng):
             'input': {
                 'methodName': method,
                 'viewId': {'scope': 'scene', 'id': rng.randint(0, 5)},
-                'rpcCounter': 0,
+                'timestampMs': 0,
                 'rpcMode': rng.choice(RPC_MODES),
                 'params': params,
             },

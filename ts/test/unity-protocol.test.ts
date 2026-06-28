@@ -134,8 +134,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -145,10 +144,9 @@ describe('RPC Encode/Decode', () => {
 
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.methodName).toBe('RPC_Int');
-    expect(decoded.rpcCounter).toBe(0);
+    expect(decoded.timestampMs).toBe(0);
     expect(decoded.rpcMode).toBe('Server');
     expect(decoded.firstUse).toBe(false);
-    expect(decoded.viewId).toBe(1);
     expect(decoded.params).toEqual([42]);
     expect(decoded.methodIndex).toBeDefined();
   });
@@ -157,8 +155,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -171,8 +168,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcFirstUse({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -187,8 +183,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'TestDynamic',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -201,8 +196,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcFirstUse({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: 3.14 }],
-      viewId: 1,
-      rpcCounter: 1,
+      timestampMs: 1,
       mode: RpcMode.All,
       targetView: 0x2000,
     });
@@ -213,7 +207,6 @@ describe('RPC Encode/Decode', () => {
     expect(decoded.methodName).toBe('RPC_Float');
     expect(decoded.rpcMode).toBe('All');
     expect(decoded.firstUse).toBe(true);
-    expect(decoded.viewId).toBe(1);
     expect(decoded.params[0]).toBeCloseTo(3.14, 5);
   });
 
@@ -221,8 +214,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -233,21 +225,19 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 0 }],
-      viewId: 1,
-      rpcCounter: 5,
+      timestampMs: 5,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
-    expect(decoded.rpcCounter).toBe(5);
+    expect(decoded.timestampMs).toBe(5);
   });
 
   it('round-trips int param', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: -42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -259,8 +249,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: -1.5 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -272,8 +261,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_String',
       params: [{ type: 'string', value: 'hello world' }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -285,8 +273,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_String',
       params: [{ type: 'string', value: '' }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -298,8 +285,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Vector3',
       params: [{ type: 'Vector3', value: [1.5, -2.5, 3.0] }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -314,8 +300,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Quaternion',
       params: [{ type: 'Quaternion', value: [0.1, 0.2, 0.3, 0.9] }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -331,8 +316,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Bytes',
       params: [{ type: 'bytes', value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]) }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -344,8 +328,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Bytes',
       params: [{ type: 'bytes', value: new Uint8Array(0) }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -357,8 +340,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_NetworkViewID',
       params: [{ type: 'NetworkViewID', value: 42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -370,8 +352,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_NetworkPlayer',
       params: [{ type: 'NetworkPlayer', value: 7 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -387,8 +368,7 @@ describe('RPC Encode/Decode', () => {
         { type: 'float', value: 2.5 },
         { type: 'string', value: 'test' },
       ],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -402,8 +382,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -419,15 +398,13 @@ describe('RPC Encode/Decode', () => {
         { type: 'float', value: 0.5 },
         { type: 'string', value: 'abc' },
       ],
-      viewId: 5,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.All,
       targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.methodName).toBe('RPC_IntFloatString');
     expect(decoded.firstUse).toBe(true);
-    expect(decoded.viewId).toBe(5);
     expect(decoded.params[0]).toBe(-1);
     expect(decoded.params[1]).toBeCloseTo(0.5);
     expect(decoded.params[2]).toBe('abc');
@@ -437,8 +414,7 @@ describe('RPC Encode/Decode', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 99 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Player,
       targetView: 0x2000,
     });
@@ -447,25 +423,24 @@ describe('RPC Encode/Decode', () => {
     expect(decoded.params).toEqual([99]);
   });
 
-  it('captures viewId from header', () => {
+  it('round-trips u64 timestamp > 65535', () => {
+    const ts = 200000;
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 12345,
-      rpcCounter: 0,
+      timestampMs: ts,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
-    expect(decoded.viewId).toBe(12345);
+    expect(decoded.timestampMs).toBe(ts);
   });
 
   it('unknown method returns empty params without throwing', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Void',
       params: [],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -542,45 +517,35 @@ describe('Delta State Sync', () => {
   });
 });
 
-describe('RPC counter overflow', () => {
-  it('counter wraps at 65536 (16-bit field)', () => {
-    const encode = (counter: number) =>
+describe('RPC u64 timestamp', () => {
+  it('round-trips various timestamp values including > 65535', () => {
+    const encode = (ts: number) =>
       encodeRpcSubsequent({
         methodName: 'RPC_Int',
         params: [{ type: 'int', value: 1 }],
-        viewId: 1,
-        rpcCounter: counter,
+        timestampMs: ts,
         mode: RpcMode.Server,
         targetView: 0x2000,
       });
 
-    const r0 = encode(0);
-    const r127 = encode(127);
-    const r128 = encode(128);
-    const r32767 = encode(32767);
-    const r32768 = encode(32768);
-    const r65536 = encode(65536);
-
-    expect(decodeRpc(r0.data, r0.bitLength).rpcCounter).toBe(0);
-    expect(decodeRpc(r127.data, r127.bitLength).rpcCounter).toBe(127);
-    expect(decodeRpc(r128.data, r128.bitLength).rpcCounter).toBe(128);
-    expect(decodeRpc(r32767.data, r32767.bitLength).rpcCounter).toBe(32767);
-    expect(decodeRpc(r32768.data, r32768.bitLength).rpcCounter).toBe(32768);
-    expect(decodeRpc(r65536.data, r65536.bitLength).rpcCounter).toBe(0); // wraps
+    const cases = [0, 127, 128, 32767, 32768, 65535, 65536, 100000, 200000, 955000];
+    for (const ts of cases) {
+      const r = encode(ts);
+      expect(decodeRpc(r.data, r.bitLength).timestampMs).toBe(ts);
+    }
   });
 
-  it('counter values 0-500 all encode/decode correctly', () => {
+  it('timestamp values 0-500 all encode/decode correctly', () => {
     for (let i = 0; i <= 500; i++) {
       const result = encodeRpcSubsequent({
         methodName: 'RPC_Void',
         params: [],
-        viewId: 1,
-        rpcCounter: i,
+        timestampMs: i,
         mode: RpcMode.Server,
         targetView: 0x2000,
       });
       const decoded = decodeRpc(result.data, result.bitLength);
-      expect(decoded.rpcCounter).toBe(i % 65536);
+      expect(decoded.timestampMs).toBe(i);
       expect(decoded.methodName).toBe('RPC_Void');
     }
   });
@@ -589,13 +554,12 @@ describe('RPC counter overflow', () => {
     const r200 = encodeRpcFirstUse({
       methodName: 'RPC_String',
       params: [{ type: 'string', value: 'test' }],
-      viewId: 1,
-      rpcCounter: 200,
+      timestampMs: 200,
       mode: RpcMode.All,
       targetView: 0x2000,
     });
     const decoded = decodeRpc(r200.data, r200.bitLength);
-    expect(decoded.rpcCounter).toBe(200);
+    expect(decoded.timestampMs).toBe(200);
     expect(decoded.params[0]).toBe('test');
   });
 });
@@ -605,8 +569,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: NaN }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -618,8 +581,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: Infinity }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -631,8 +593,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: -Infinity }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -644,8 +605,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: -0 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -657,8 +617,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Vector3',
       params: [{ type: 'Vector3', value: [NaN, 0, Infinity] }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -675,8 +634,7 @@ describe('Float edge values', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Float',
       params: [{ type: 'float', value: denorm }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -726,8 +684,7 @@ describe('Encoding edge cases', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Vector3',
       params: [{ type: 'Vector3', value: [0, 0, 0] }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -739,8 +696,7 @@ describe('Encoding edge cases', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Quaternion',
       params: [{ type: 'Quaternion', value: [0, 0, 0, 0] }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -752,8 +708,7 @@ describe('Encoding edge cases', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: -2147483648 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -763,8 +718,7 @@ describe('Encoding edge cases', () => {
     const result2 = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 2147483647 }],
-      viewId: 1,
-      rpcCounter: 1,
+      timestampMs: 1,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -776,8 +730,7 @@ describe('Encoding edge cases', () => {
     const result = encodeRpcSubsequent({
       methodName: 'RPC_Bytes',
       params: [{ type: 'bytes', value: new Uint8Array(0) }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -830,8 +783,7 @@ describe('Encoding edge cases', () => {
     const result = encodeRpcFirstUse({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });
@@ -842,7 +794,7 @@ describe('Encoding edge cases', () => {
     }
     const decoded = decodeRpc(data, result.bitLength);
     // Should decode without crashing; method name is 'unknown' or similar
-    expect(decoded.rpcCounter).toBe(0);
+    expect(decoded.timestampMs).toBe(0);
   });
 });
 
@@ -851,8 +803,7 @@ describe('RPC modes and relay', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Others,
       targetView: 0x2000,
     });
@@ -865,8 +816,7 @@ describe('RPC modes and relay', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.All,
       targetView: 0x2000,
     });
@@ -879,13 +829,13 @@ describe('RPC modes and relay', () => {
     const normal = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+      timestampMs: 0, mode: RpcMode.Others,
       targetView: 0x2000,
     });
     const relay = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      timestampMs: 0, mode: RpcMode.Others, relay: true,
       targetView: 0x2000,
     });
     expect(relay.bitLength - normal.bitLength).toBe(5);
@@ -895,13 +845,13 @@ describe('RPC modes and relay', () => {
     const normal = encodeRpcFirstUse({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+      timestampMs: 0, mode: RpcMode.Others,
       targetView: 0x2000,
     });
     const relay = encodeRpcFirstUse({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      timestampMs: 0, mode: RpcMode.Others, relay: true,
       targetView: 0x2000,
     });
     expect(relay.bitLength - normal.bitLength).toBe(5);
@@ -911,12 +861,12 @@ describe('RPC modes and relay', () => {
     const relay = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      timestampMs: 0, mode: RpcMode.Others, relay: true,
       targetView: 0x2000,
     });
     const decoded = decodeRpc(relay.data, relay.bitLength);
     expect(decoded.methodName).toBe('RPC_Int');
-    expect(decoded.rpcCounter).toBe(0);
+    expect(decoded.timestampMs).toBe(0);
     expect(decoded.rpcMode).toBe('Others');
   });
 
@@ -924,7 +874,7 @@ describe('RPC modes and relay', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
-      viewId: 1, rpcCounter: 0, mode: RpcMode.Server,
+      timestampMs: 0, mode: RpcMode.Server,
       targetView: 0x2640,
     });
     const bits = [...encoded.data].map(b => b.toString(2).padStart(8, '0')).join('');
@@ -974,8 +924,7 @@ describe('bytes param size limit', () => {
     const { data, bitLength } = encodeRpcSubsequent({
       methodName: 'RPC_Bytes',
       params: [{ type: 'bytes', value: new Uint8Array(0) }],
-      viewId: 1,
-      rpcCounter: 0,
+      timestampMs: 0,
       mode: RpcMode.Server,
       targetView: 0x2000,
     });

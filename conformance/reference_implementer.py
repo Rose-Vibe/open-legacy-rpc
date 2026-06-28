@@ -234,7 +234,7 @@ def process_rpcEncode(inp):
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_subsequent(
         inp['methodName'], params, view_id=_view_id_int(inp['viewId']),
-        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
+        timestamp_ms=inp['timestampMs'], mode=mode, target_view=0x2000,
     )
     return {'dataHex': data.hex(), 'bitLength': bits}
 
@@ -243,7 +243,7 @@ def process_rpcDecode(inp):
     d = decode_rpc(bytes.fromhex(inp['dataHex']), inp['bitLength'])
     return {
         'methodName': d.get('method_name', ''),
-        'rpcCounter': d.get('rpc_counter', 0),
+        'timestampMs': d.get('timestamp_ms', 0),
         'rpcMode': d['rpc_mode'].name if 'rpc_mode' in d else '',
     }
 
@@ -253,7 +253,7 @@ def process_rpcFirstUse(inp):
     mode = MODE_MAP[inp['rpcMode']]
     data, bits = encode_rpc_first_use(
         inp['methodName'], params, view_id=_view_id_int(inp['viewId']),
-        rpc_counter=inp['rpcCounter'], mode=mode, target_view=0x2000,
+        timestamp_ms=inp['timestampMs'], mode=mode, target_view=0x2000,
     )
     return {'dataHex': data.hex(), 'bitLength': bits}
 

@@ -89,7 +89,7 @@ log = logging.getLogger('timestamp-field')
 server = UnityServer(port=7777)
 client_ready = False
 client_addr = None
-rpc_counter = 0
+timestamp_ms = 0
 
 
 def on_connect(addr, player_idx):
@@ -140,7 +140,7 @@ try:
         log.info(f"  [{label}] Sending RPC_Int({param}) field=0x{field_val:04x}")
 
         payload, bits = encode_rpc_first_use(
-            'RPC_Int', [param], view_id=0, rpc_counter=rpc_counter,
+            'RPC_Int', [param], view_id=0, timestamp_ms=timestamp_ms,
             mode=RPCMode.Server, target_view=0x0002)
 
         patched, bits = patch_zeros_field(payload, bits, field_val,
@@ -150,7 +150,7 @@ try:
         log.info(f"    patched: {patched.hex()}")
 
         server._raknet.send_to(client_addr, patched, Reliability.RELIABLE_ORDERED)
-        rpc_counter += 1
+        timestamp_ms += 1
         poll_server(server, 10)
 
     log.info(f"All {len(TEST_CASES)} RPCs sent. Waiting for client to finish...")

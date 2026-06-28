@@ -12,6 +12,7 @@ public class Loader : MonoBehaviour
     string serverAddress = "127.0.0.1";
     int port = DefaultPort;
     string password = "";
+    float connectDelay;
     string experimentName;
     string[] experimentArgs;
     IExperiment experiment;
@@ -61,13 +62,37 @@ public class Loader : MonoBehaviour
         {
             Debug.Log("[Loader] Initializing server on port " + port + " maxConnections=" + maxConnections);
             Network.InitializeServer(maxConnections, port, false);
+            started = true;
+        }
+        else if (connectDelay > 0)
+        {
+            Debug.Log("[Loader] Delaying connect by " + connectDelay + "s (simulating menu time)");
+            StartCoroutine(DelayedConnect());
         }
         else
         {
             Debug.Log("[Loader] Connecting to " + serverAddress + ":" + port +
                       (password.Length > 0 ? " (with password)" : ""));
             Network.Connect(serverAddress, port, password);
+            started = true;
         }
+    }
+
+    System.Collections.IEnumerator DelayedConnect()
+    {
+        float startTime = Time.realtimeSinceStartup;
+        while (Time.realtimeSinceStartup - startTime < connectDelay)
+        {
+            if ((int)(Time.realtimeSinceStartup - startTime) % 10 == 0 &&
+                Time.realtimeSinceStartup - startTime > 0.5f)
+            {
+                Debug.Log("[Loader] Waiting... " + (int)(Time.realtimeSinceStartup - startTime) + "/" + (int)connectDelay + "s");
+            }
+            yield return new WaitForSeconds(1f);
+        }
+        Debug.Log("[Loader] Connect delay complete. realtimeSinceStartup=" + Time.realtimeSinceStartup);
+        Debug.Log("[Loader] Connecting to " + serverAddress + ":" + port);
+        Network.Connect(serverAddress, port, password);
         started = true;
     }
 
@@ -293,6 +318,10 @@ public class Loader : MonoBehaviour
             else if (args[i] == "--max-connections" && i + 1 < args.Length)
             {
                 maxConnections = int.Parse(args[++i]);
+            }
+            else if (args[i] == "--connect-delay" && i + 1 < args.Length)
+            {
+                connectDelay = float.Parse(args[++i]);
             }
             else
             {

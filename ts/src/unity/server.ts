@@ -228,16 +228,15 @@ export class UnityServer {
     session: ClientSession,
     methodName: string,
     params: RpcParam[],
-    viewId: number,
+    _viewId: number,
     mode: RpcMode,
     targetView: ViewId | number,
     relay?: boolean,
   ): void {
     const uptimeMs = Number((process.hrtime.bigint() - this.epochNs) / 1_000_000n);
-    const rpcTimestamp = uptimeMs & 0xffff;
 
     let result: { data: Uint8Array; bitLength: number };
-    const opts = { methodName, params, viewId, rpcCounter: rpcTimestamp, mode, targetView, ...(relay && { relay }) };
+    const opts = { methodName, params, timestampMs: uptimeMs, mode, targetView, ...(relay && { relay }) };
     const peerIdx = this.usePeerBatchIndices
       ? this.peerIndices.get(session.id)?.get(methodName)
       : undefined;
@@ -307,7 +306,6 @@ export class UnityServer {
       }
     }
 
-    (session as ClientSession & { lastRpcViewId?: number }).lastRpcViewId = decoded.viewId;
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
       handler(session, ...decoded.params);

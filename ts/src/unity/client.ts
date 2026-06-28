@@ -41,7 +41,7 @@ export class UnityClient {
   private connectHandlers: Array<EventHandler<[]>> = [];
   private disconnectHandlers: Array<EventHandler<[string]>> = [];
   private rpcReceivedFirstUse: string[] = [];
-  private rpcCounter = 0;
+  private readonly epochNs = process.hrtime.bigint();
   private serverIndices = new Map<string, number>();
   private ourIndices = new Map<string, number>();
   private ourIndexReverse = new Map<number, string>();
@@ -140,13 +140,12 @@ export class UnityClient {
     params: RpcParam[],
     options: { viewId?: number; mode?: RpcMode; targetView: ViewId | number; relay?: boolean },
   ): void {
-    const viewId = options.viewId ?? 1;
     const mode = options.mode ?? RpcMode.Server;
     const { targetView } = options;
     const relay = options.relay;
-    const counter = this.rpcCounter++;
+    const uptimeMs = Number((process.hrtime.bigint() - this.epochNs) / 1_000_000n);
 
-    const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
+    const opts = { methodName, params, timestampMs: uptimeMs, mode, targetView, ...(relay && { relay }) };
     let result: { data: Uint8Array; bitLength: number };
     const serverIdx = this.serverIndices.get(methodName);
     if (serverIdx !== undefined) {

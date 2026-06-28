@@ -32,7 +32,13 @@ echo "  Delay: ${DELAY}s between server and client start"
 echo "  Timeout: ${TIMEOUT}s after client starts"
 
 PIDS=()
+TSHARK_PID=""
 cleanup() {
+    # Stop tshark gracefully first so it flushes the pcap
+    if [ -n "$TSHARK_PID" ]; then
+        sudo kill -INT "$TSHARK_PID" 2>/dev/null || true
+        sleep 2
+    fi
     for pid in "${PIDS[@]}"; do
         sudo kill "$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
     done
@@ -40,15 +46,15 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         sudo kill -9 "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
     done
-    sudo pkill -f "tshark.*$PCAP_FILE" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # Start packet capture
 sudo ip netns exec "$NS" tshark -i lo -f 'udp port 7777' -w "$PCAP_FILE" \
-    > /dev/null 2>&1 &
-PIDS+=($!)
-sleep 1
+    2>/dev/null &
+TSHARK_PID=$!
+PIDS+=($TSHARK_PID)
+sleep 2
 
 # Start Unity server
 sudo ip netns exec "$NS" "$PLAYER" \
@@ -113,7 +119,7 @@ echo "--- Client clock baseline ---"
 grep -E "CLOCK BASELINE|Process\.|TickCount|realtimeSince|DateTime|Network\.time" "$CLIENT_LOG" 2>/dev/null || echo "(no baseline)"
 echo ""
 echo "--- Server sends ---"
-grep "SERVER_SEND\|Tick #" "$SERVER_LOG" 2>/dev/null | head -20 || echo "(no sends)"
+grep "PHASE\|SEND\|Player connected" "$SERVER_LOG" 2>/dev/null | head -20 || echo "(no sends)"
 echo ""
 echo "--- Client received RPCs ---"
 grep "\[RPC\]\|RECV\|timestamp\|Network\.time" "$CLIENT_LOG" 2>/dev/null | head -30 || echo "(no RPCs)"

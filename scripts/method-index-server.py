@@ -44,11 +44,11 @@ def poll_server(srv, count=1, interval=0.05):
 
 
 def make_subsequent_with_index(method_name, params, method_index, view_id=0,
-                                rpc_counter=0, target_view=0x0002):
+                                timestamp_ms=0, target_view=0x0002):
     """Encode a subsequent-use RPC with an explicitly chosen method_index."""
     from protocol.bitstream import BitStream
     from protocol.unity_protocol import (
-        MSG_ID_RPC, encode_view_id, METHOD_SIGNATURES,
+        MSG_ID_RPC, METHOD_SIGNATURES,
         _encode_params, INTERNAL_RPCS, INTERNAL_RPC_CONSTANT,
         _resolve_target_view,
     )
@@ -65,10 +65,8 @@ def make_subsequent_with_index(method_name, params, method_index, view_id=0,
 
     bs = BitStream()
     bs.write_u8(0x1b)  # MSG_ID_RPC
-    bs.write_bytes(encode_view_id(view_id))
-    counter16 = rpc_counter & 0xFFFF
-    bs.write_u8((counter16 >> 8) & 0xFF)
-    bs.write_u8(counter16 & 0xFF)
+    bs.write_u32_be((timestamp_ms >> 32) & 0xFFFFFFFF)
+    bs.write_u32_be(timestamp_ms & 0xFFFFFFFF)
     bs.write_u8(0x0b)
     # first_use = 0
     bs.write_bit(0)
@@ -132,7 +130,7 @@ try:
     # === Test A: baseline — first-use then subsequent with formula index 0x54 ===
     log.info("=== TEST A: first-use + subsequent index=0x54 (formula) ===")
     payload, bits = encode_rpc_first_use(
-        'RPC_Int', [100], view_id=0, rpc_counter=rpc_counter,
+        'RPC_Int', [100], view_id=0, timestamp_ms=rpc_counter,
         mode=RPCMode.Server, target_view=0x0002)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
@@ -140,7 +138,7 @@ try:
     poll_server(server, 20)
 
     payload, bits = make_subsequent_with_index('RPC_Int', [101], 0x54,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1
@@ -149,7 +147,7 @@ try:
     # === Test B: first-use then subsequent with arbitrary index 0x42 ===
     log.info("=== TEST B: first-use + subsequent index=0x42 (arbitrary) ===")
     payload, bits = encode_rpc_first_use(
-        'RPC_Int', [200], view_id=0, rpc_counter=rpc_counter,
+        'RPC_Int', [200], view_id=0, timestamp_ms=rpc_counter,
         mode=RPCMode.Server, target_view=0x0002)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
@@ -157,7 +155,7 @@ try:
     poll_server(server, 20)
 
     payload, bits = make_subsequent_with_index('RPC_Int', [201], 0x42,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1
@@ -166,7 +164,7 @@ try:
     # === Test C: first-use then subsequent with index 0x00 ===
     log.info("=== TEST C: first-use + subsequent index=0x00 (zero) ===")
     payload, bits = encode_rpc_first_use(
-        'RPC_Int', [300], view_id=0, rpc_counter=rpc_counter,
+        'RPC_Int', [300], view_id=0, timestamp_ms=rpc_counter,
         mode=RPCMode.Server, target_view=0x0002)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
@@ -174,7 +172,7 @@ try:
     poll_server(server, 20)
 
     payload, bits = make_subsequent_with_index('RPC_Int', [301], 0x00,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1
@@ -183,7 +181,7 @@ try:
     # === Test D: subsequent-use without any first-use, index=0x54 ===
     log.info("=== TEST D: subsequent index=0x54, NO first-use ===")
     payload, bits = make_subsequent_with_index('RPC_Int', [400], 0x54,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1
@@ -192,7 +190,7 @@ try:
     # === Test E: first-use then two subsequent-use with same arbitrary index 0x20 ===
     log.info("=== TEST E: first-use + 2x subsequent index=0x20 ===")
     payload, bits = encode_rpc_first_use(
-        'RPC_Int', [500], view_id=0, rpc_counter=rpc_counter,
+        'RPC_Int', [500], view_id=0, timestamp_ms=rpc_counter,
         mode=RPCMode.Server, target_view=0x0002)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
@@ -200,14 +198,14 @@ try:
     poll_server(server, 20)
 
     payload, bits = make_subsequent_with_index('RPC_Int', [501], 0x20,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1
     poll_server(server, 20)
 
     payload, bits = make_subsequent_with_index('RPC_Int', [502], 0x20,
-                                               rpc_counter=rpc_counter)
+                                               timestamp_ms=rpc_counter)
     server._raknet.send_to(client_addr, payload, Reliability.RELIABLE_ORDERED,
                            bit_length=bits)
     rpc_counter += 1

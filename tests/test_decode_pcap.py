@@ -155,7 +155,7 @@ def test_frame_split():
 
 def test_rpc_first_use_decode():
     data, bits = encode_rpc_first_use(
-        'RPC_Int', [42], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Int', [42], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     result = decode_unity(data, bits, {})
     assert result['type'] == 'rpc'
@@ -172,13 +172,13 @@ def test_rpc_first_use_decode():
 
 def test_rpc_subsequent_decode():
     data, bits = encode_rpc_subsequent(
-        'RPC_Int', [99], view_id=1, rpc_counter=5, mode=RPCMode.Others,
+        'RPC_Int', [99], view_id=1, timestamp_ms=5, mode=RPCMode.Others,
         target_view=0x2000)
     result = decode_unity(data, bits, {})
     assert result['type'] == 'rpc'
     assert result['variant'] == 'subsequent_use'
     assert result['methodName'] == 'RPC_Int'
-    assert result['rpcCounter'] == 5
+    assert result['timestampMs'] == 5
     assert result['params'][0]['value'] == 99
     assert 'methodIndex' in result
     assert result['targetView'] == 0x2000
@@ -191,7 +191,7 @@ def test_rpc_unknown_signature():
     INDEX_TO_METHOD[126] = 'FakeMethod'
     try:
         data, bits = encode_rpc_subsequent(
-            'FakeMethod', [], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+            'FakeMethod', [], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
             target_view=0x2000, method_index=126)
         result = decode_unity(data, bits, {})
         assert result['type'] == 'rpc'
@@ -205,7 +205,7 @@ def test_rpc_config_signature():
     """Config-provided method signatures are used for decoding."""
     config = {'methodSignatures': {'RPC_Int': ['int']}}
     data, bits = encode_rpc_subsequent(
-        'RPC_Int', [77], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Int', [77], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     result = decode_unity(data, bits, config)
     assert result['params'][0]['type'] == 'deserialized'
@@ -293,7 +293,7 @@ def test_json_safe_nested():
 def test_full_pipeline_rpc():
     """End-to-end: pack a datagram with an RPC, decode it."""
     rpc_data, rpc_bits = encode_rpc_subsequent(
-        'RPC_Void', [], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Void', [], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     enc = _pack_encapsulated(rpc_data, Reliability.RELIABLE_ORDERED)
     raw = _pack_datagram(0, enc)
@@ -320,7 +320,7 @@ def test_direction_detection():
     from tools.decode_pcap import main
     config = {'serverPort': 7777}
     rpc_data, _ = encode_rpc_subsequent(
-        'RPC_Void', [], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Void', [], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     enc = _pack_encapsulated(rpc_data, Reliability.RELIABLE_ORDERED)
     raw = _pack_datagram(0, enc)
@@ -330,18 +330,19 @@ def test_direction_detection():
 
 
 def test_view_names():
+    """RPC no longer carries a view_id (bytes 1-8 are timestamp), so viewName is absent."""
     config = {'viewNames': {'1': 'Player'}}
     data, bits = encode_rpc_subsequent(
-        'RPC_Int', [42], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Int', [42], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     result = decode_unity(data, bits, config)
-    assert result.get('viewName') == 'Player'
+    assert 'viewName' not in result
 
 
 def test_rawHex_at_every_level():
     """Every layer should include rawHex."""
     rpc_data, _ = encode_rpc_subsequent(
-        'RPC_Int', [1], view_id=1, rpc_counter=0, mode=RPCMode.Server,
+        'RPC_Int', [1], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
         target_view=0x2000)
     enc = _pack_encapsulated(rpc_data, Reliability.RELIABLE_ORDERED)
     raw = _pack_datagram(0, enc)
