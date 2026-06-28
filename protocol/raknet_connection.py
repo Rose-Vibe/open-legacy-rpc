@@ -90,9 +90,10 @@ class RakNetClient:
             self.sock = None
 
     def send_message(self, payload, reliability=Reliability.RELIABLE_ORDERED,
-                     ordering_channel=0):
+                     ordering_channel=0, bit_length=None):
         if self.peer:
-            self.peer.send_message(payload, reliability, ordering_channel)
+            self.peer.send_message(payload, reliability, ordering_channel,
+                                   bit_length=bit_length)
 
     def poll(self, timeout=0.0):
         """Poll for incoming messages. Returns list of (msg_id, payload, reliability, bit_length) tuples."""
@@ -283,15 +284,17 @@ class RakNetServer:
         self._message_handlers[msg_id] = handler
 
     def send_to(self, addr, payload, reliability=Reliability.RELIABLE_ORDERED,
-                ordering_channel=0):
+                ordering_channel=0, bit_length=None):
         if addr in self.peers:
-            self.peers[addr].send_message(payload, reliability, ordering_channel)
+            self.peers[addr].send_message(payload, reliability, ordering_channel,
+                                          bit_length=bit_length)
 
     def broadcast(self, payload, reliability=Reliability.RELIABLE_ORDERED,
-                  exclude=None, ordering_channel=0):
+                  exclude=None, ordering_channel=0, bit_length=None):
         for addr, peer in self.peers.items():
             if addr != exclude:
-                peer.send_message(payload, reliability, ordering_channel)
+                peer.send_message(payload, reliability, ordering_channel,
+                                  bit_length=bit_length)
 
     def poll(self, timeout=0.0):
         """Poll for incoming messages. Returns list of (addr, msg_id, payload, reliability, bit_length) tuples."""

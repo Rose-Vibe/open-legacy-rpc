@@ -7,7 +7,7 @@ wire format.
 import sys
 from protocol.unity_protocol import (
     encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
-    RPCMode, USER_RPC_CONSTANT, METHOD_TAG_MAP,
+    RPCMode, INTERNAL_RPC_CONSTANT, METHOD_TAG_MAP,
     register_method_tag,
 )
 
@@ -119,7 +119,8 @@ GOLDEN_RELAY = {
 def _encode(entry, first_use=False):
     p = entry['params']
     fn = encode_rpc_first_use if first_use else encode_rpc_subsequent
-    return fn(p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'])
+    return fn(p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+              target_view=0x2000)
 
 
 def test_subsequent_int42_matches_ts():
@@ -197,7 +198,7 @@ def test_subsequent_custom_constant_matches_ts():
     p = entry['params']
     data, bits = encode_rpc_subsequent(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
-        user_rpc_constant=entry['constant'])
+        target_view=entry['constant'])
     assert data.hex() == entry['hex']
     assert bits == entry['bits']
 
@@ -207,7 +208,7 @@ def test_first_use_custom_constant_matches_ts():
     p = entry['params']
     data, bits = encode_rpc_first_use(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
-        user_rpc_constant=entry['constant'])
+        target_view=entry['constant'])
     assert data.hex() == entry['hex']
     assert bits == entry['bits']
 
@@ -217,6 +218,7 @@ def test_subsequent_relay_matches_ts():
     p = entry['params']
     data, bits = encode_rpc_subsequent(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+            target_view=0x2000,
         relay=True)
     assert data.hex() == entry['hex']
     assert bits == entry['bits']
@@ -227,6 +229,7 @@ def test_first_use_relay_matches_ts():
     p = entry['params']
     data, bits = encode_rpc_first_use(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+            target_view=0x2000,
         relay=True)
     assert data.hex() == entry['hex']
     assert bits == entry['bits']
@@ -237,17 +240,19 @@ def test_relay_adds_5_bits():
     p = {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
          'rpcCounter': 0, 'mode': RPCMode.Others}
     _, normal_bits = encode_rpc_subsequent(
-        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'])
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        target_view=0x2000)
     _, relay_bits = encode_rpc_subsequent(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
-        relay=True)
+        target_view=0x2000, relay=True)
     assert relay_bits - normal_bits == 5
 
     _, normal_bits_fu = encode_rpc_first_use(
-        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'])
+        p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
+        target_view=0x2000)
     _, relay_bits_fu = encode_rpc_first_use(
         p['methodName'], p['params'], p['viewId'], p['rpcCounter'], p['mode'],
-        relay=True)
+        target_view=0x2000, relay=True)
     assert relay_bits_fu - normal_bits_fu == 5
 
 
@@ -275,7 +280,7 @@ def test_ts_golden_decodes_correctly():
                 f"{name}: params {decoded['params']} != {p['params']}"
 
 
-def test_user_rpc_constant_0x2000_in_wire():
+def test_target_view_0x2000_in_wire():
     """The 0x2000 constant appears in the wire format at the expected position."""
     data, bits = _encode(GOLDEN['sub_int_42'])
     all_bits = ''.join(f'{b:08b}' for b in data)

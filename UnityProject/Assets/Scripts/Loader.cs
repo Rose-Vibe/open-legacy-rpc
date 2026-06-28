@@ -166,7 +166,8 @@ public class Loader : MonoBehaviour
     [RPC]
     void RPC_Int(int a, NetworkMessageInfo info)
     {
-        Debug.Log("[RPC] RPC_Int(" + a + ") from " + info.sender);
+        Debug.Log("[RPC] RPC_Int(" + a + ") from " + info.sender +
+                  " timestamp=" + info.timestamp + " Network.time=" + Network.time);
         if (OnRPC_Int != null) OnRPC_Int(a, info);
     }
 

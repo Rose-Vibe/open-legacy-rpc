@@ -9,6 +9,7 @@ import {
   isRpc,
   getBuiltinMethodNames,
   hasMethodIndex,
+  learnMethodIndex,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
@@ -16,6 +17,7 @@ import type { RpcDefinition } from '../services/rpc-schema.js';
 import { argsToRpcParams, rpcParamsToArgs } from '../services/rpc-schema.js';
 import { decodeStateSync } from './state-sync.js';
 import type { DecodedStateSync } from './state-sync.js';
+import type { ViewId } from './view-id.js';
 
 type EventHandler<T extends unknown[]> = (...args: T) => void;
 
@@ -36,6 +38,7 @@ export class UnityClient {
   private connectHandlers: Array<EventHandler<[]>> = [];
   private disconnectHandlers: Array<EventHandler<[string]>> = [];
   private rpcSentMethods = new Set<string>(getBuiltinMethodNames());
+  private rpcReceivedFirstUse: string[] = [];
   private rpcCounter = 0;
 
   constructor(socket: UdpSocket) {
@@ -46,6 +49,7 @@ export class UnityClient {
     });
 
     this.raknet.onDisconnect(() => {
+      this.rpcReceivedFirstUse = [];
       for (const h of this.disconnectHandlers) h('disconnected');
     });
 
@@ -109,13 +113,11 @@ export class UnityClient {
   sendTypedRpc<T>(
     def: RpcDefinition<T>,
     args: T,
-    options?: { viewId?: number; mode?: RpcMode },
+    options: { viewId?: number; mode?: RpcMode; targetView: ViewId | number },
   ): void {
     def.zodSchema.parse(args);
-    const viewId = options?.viewId ?? 1;
-    const mode = options?.mode ?? RpcMode.Server;
     const params = argsToRpcParams(def, args);
-    this.sendRpc(def.name, params, { viewId, mode });
+    this.sendRpc(def.name, params, options);
   }
 
   /** Register a state sync handler. Pass viewId=null for a catch-all handler. */
@@ -126,15 +128,15 @@ export class UnityClient {
   sendRpc(
     methodName: string,
     params: RpcParam[],
-    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
+    options: { viewId?: number; mode?: RpcMode; targetView: ViewId | number; relay?: boolean },
   ): void {
-    const viewId = options?.viewId ?? 1;
-    const mode = options?.mode ?? RpcMode.Server;
-    const userRpcConstant = options?.userRpcConstant;
-    const relay = options?.relay;
+    const viewId = options.viewId ?? 1;
+    const mode = options.mode ?? RpcMode.Server;
+    const { targetView } = options;
+    const relay = options.relay;
     const counter = this.rpcCounter++;
 
-    const opts = { methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }), ...(relay && { relay }) };
+    const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
     let result: { data: Uint8Array; bitLength: number };
     if (this.rpcSentMethods.has(methodName) && hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent(opts);
@@ -143,11 +145,11 @@ export class UnityClient {
       if (hasMethodIndex(methodName)) this.rpcSentMethods.add(methodName);
     }
 
-    this.raknet.send(result.data, Reliability.RELIABLE_ORDERED);
+    this.raknet.send(result.data, Reliability.RELIABLE_ORDERED, result.bitLength);
   }
 
-  sendRaw(payload: Uint8Array, reliability: Reliability): void {
-    this.raknet.send(payload, reliability);
+  sendRaw(payload: Uint8Array, reliability: Reliability, bitLength?: number): void {
+    this.raknet.send(payload, reliability, bitLength);
   }
 
   private handleMessage(msg: IncomingMessage): void {
@@ -172,6 +174,17 @@ export class UnityClient {
       console.warn('Failed to decode RPC:', e);
       return;
     }
+
+    if (decoded.firstUse && decoded.methodName !== 'unknown') {
+      this.rpcReceivedFirstUse.push(decoded.methodName);
+    } else if (!decoded.firstUse && decoded.methodIndex !== undefined &&
+               decoded.methodName.startsWith('unknown_0x') &&
+               this.rpcReceivedFirstUse.length > 0) {
+      const pending = this.rpcReceivedFirstUse.shift()!;
+      learnMethodIndex(pending, decoded.methodIndex);
+      decoded.methodName = pending;
+    }
+
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
       handler(...decoded.params);

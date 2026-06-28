@@ -63,9 +63,9 @@ def test_rpc_client_to_server():
         client.connect('127.0.0.1', 17772, timeout=2.0)
         assert client.connected
 
-        client.send_rpc('RPC_Int', [42])
-        client.send_rpc('RPC_Float', [3.14])
-        client.send_rpc('RPC_String', ['hello'])
+        client.send_rpc('RPC_Int', [42], target_view=0x2000)
+        client.send_rpc('RPC_Float', [3.14], target_view=0x2000)
+        client.send_rpc('RPC_String', ['hello'], target_view=0x2000)
 
         # Poll to ensure messages are sent
         for _ in range(20):
@@ -109,7 +109,7 @@ def test_rpc_server_to_client():
         assert client_addr[0] is not None
 
         # Server sends RPC to client
-        server.send_rpc('RPC_Int', [99], target=client_addr[0])
+        server.send_rpc('RPC_Int', [99], target=client_addr[0], target_view=0x2000)
 
         # Client polls to receive
         for _ in range(20):
@@ -182,7 +182,7 @@ def test_multi_param_rpc():
     client = UnityClient()
     try:
         client.connect('127.0.0.1', 17775, timeout=2.0)
-        client.send_rpc('RPC_IntFloatString', [42, 3.14, 'hello'])
+        client.send_rpc('RPC_IntFloatString', [42, 3.14, 'hello'], target_view=0x2000)
 
         for _ in range(20):
             client.poll(0.05)

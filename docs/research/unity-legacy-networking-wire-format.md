@@ -190,7 +190,7 @@ receiver has already cached the method from the first-use message.
 |------------|-------|-------|
 | 80 | 1 | first_use = 0 |
 | 81–87 | 7 | method_index (7 bits; actual byte = `index & 0xFE`) |
-| 88–103 | 16 | zeros |
+| 88–103 | 16 | reserved (must be zero; Unity rejects RPCs with non-zero values) |
 | 104–119 | 16 | remaining_bit_count = total_bit_length - 121 (uint16 BE; +5 if relayed) |
 | 120–135 | 16 | user_rpc_constant (see §3.6) |
 | 136–139 | 4 | RPCMode |
@@ -198,39 +198,127 @@ receiver has already cached the method from the first-use message.
 | 140/141+ | var | parameters |
 | after params | 0 or 5 | relay padding (see §3.7) |
 
-### 3.2.1 Method Index Derivation
+### 3.2.1 Method Index and First-Use/Subsequent-Use Protocol
 
-The method index is derived from the method's position in the .NET assembly's
-MethodDef table:
+When a peer calls an RPC method for the first time on a given connection,
+it sends a **first-use** message (§3.3) containing the method's Huffman
+hash. All further calls to the same method on that connection use
+**subsequent-use** messages containing only a 7-bit `method_index`.
+
+Both sides must agree on which index maps to which method. The mapping
+is established by the protocol itself — no out-of-band configuration is
+required:
+
+1. Sender sends first-use for method M (includes Huffman hash → name).
+2. Sender sends subsequent-use for method M (includes `method_index` I).
+3. Receiver decodes the first-use hash to learn the method name.
+4. Receiver sees the subsequent-use with index I immediately after.
+5. Receiver now knows: index I = method M.
+6. All future subsequent-use messages with index I decode to method M.
+
+Unity always sends first-use then subsequent-use in strict pairs on
+RELIABLE_ORDERED delivery, so the receiver can learn every mapping from
+traffic alone. A non-Unity implementation that always sends first-use
+(never subsequent-use) is fully compatible — it just costs ~20 extra
+bytes per RPC for the Huffman hash.
+
+### 3.2.2 Method Index Derivation (Unity internals)
+
+Unity computes the `method_index` deterministically from the .NET
+assembly's MethodDef table. The exact formula has been partially
+reverse-engineered but not fully pinned down.
+
+**What is confirmed:**
+
+- `method_index = position × 4` (stride of 4, values always `0x00`,
+  `0x04`, `0x08`, ..., `0x7c`)
+- The position is per-NetworkView: each NetworkView component has its
+  own method table with its own positions
+- Interface methods are excluded from the counting
+- Non-MonoBehaviour types (delegates, plain classes) are excluded
+- Private methods without `[RPC]` are NOT counted
+- Adding `[RPC]` to a method inserts it into the counting and shifts
+  all later methods up by one position
+- There is a base offset of approximately 20, likely derived from
+  MonoBehaviour's declared method count
+
+**Approximate formula:**
+
+```
+position = base_offset + count([RPC] methods with lower MethodDef RID)
+```
+
+Where `base_offset ≈ 20` with a per-NetworkView adjustment that depends
+on the component's class hierarchy. Observed base offsets:
+
+| Component hierarchy | Base offset |
+|---|---|
+| SecondRpcBehaviour → MonoBehaviour | 20 |
+| Loader → MonoBehaviour | 21 |
+| InheritedRpcDerived → InheritedRpcBase → MonoBehaviour | 22 |
+
+The adjustment correlates with the number of user MonoBehaviour subclass
+constructors in the assembly but the exact rule is unconfirmed.
+
+**Simple formula (single-class assemblies):**
+
+For assemblies with one MonoBehaviour subclass and no other MB types,
+the formula simplifies to:
 
 ```
 method_index = (method_RID - 1 - interface_method_count) × 4
 ```
 
-Where:
-- `method_RID` = the method's row number in the MethodDef table (1-based)
-- `interface_method_count` = total number of interface methods in the
-  assembly whose RIDs are less than `method_RID`
-
-Interface methods are excluded because interfaces cannot have `[RPC]`
-methods. All other method types (constructors, delegate methods, regular
-methods) count toward the index.
-
-Verified against 7 observed values:
+This was verified against a single-class test assembly:
 
 | Method | RID | Interface methods before | Index |
 |--------|-----|------------------------|-------|
 | RPC_Int | 29 | 7 | `0x54` = (29-1-7)×4 |
 | RPC_Float | 30 | 7 | `0x58` = (30-1-7)×4 |
 | RPC_String | 31 | 7 | `0x5c` = (31-1-7)×4 |
-| RPC_Vector3 | 32 | 7 | `0x60` = (32-1-7)×4 |
 | RPC_Quaternion | 33 | 7 | `0x64` = (33-1-7)×4 |
 | RPC_Bytes | 34 | 7 | `0x68` = (34-1-7)×4 |
 | RPC_IntFloatString | 35 | 7 | `0x6c` = (35-1-7)×4 |
 
-The 7-bit field limits method indices to 0–127, allowing up to 32 non-interface
-methods in the assembly (at stride 4). Only verified with one assembly;
-the interface-exclusion rule may need refinement with multiple classes.
+This formula breaks when the assembly contains multiple MonoBehaviour
+subclasses — each additional class shifts the indices of later methods.
+
+**Multi-class assembly observations:**
+
+With IRB (2 methods), IRD (2 methods), Loader (28 methods), and
+SRB (2 methods) in one assembly:
+
+| Method | NV | Wire idx | Position | Simple formula | Delta |
+|---|---|---|---|---|---|
+| RPC_Void | Primary | 0x5c | 23 | 25 | -2 |
+| RPC_Int | Primary | 0x60 | 24 | 26 | -2 |
+| ReceiveSerializeEvent | SecondRpc | 0x50 | 20 | — | — |
+| BaseRpc | InheritedRpc | 0x58 | 22 | — | — |
+
+The delta of -2 matches the 2 extra MonoBehaviour subclass constructors
+(IRB.ctor, IRD.ctor) present in the multi-class assembly.
+
+**Cecil patching proof:**
+
+Adding `[RPC]` to 4 non-RPC Loader methods (Awake, Start, Update,
+OnSerializeNetworkView) via Mono.Cecil assembly patching shifted
+RPC_Void's position from 23 → 27 (up by exactly 4). The newly-tagged
+Awake method appeared at position 23 (the old RPC_Void position).
+This confirms the counting is [RPC]-aware, not RID-sequential.
+
+**Unsolved anomaly:**
+
+DerivedRpc on the InheritedRpc NV produces `idx=0x04` with
+`reserved=0xc000`. No formula produces position 1 for this method.
+The non-zero reserved field (normally always zero) may indicate
+bit overflow or a special encoding for inherited [RPC] methods.
+
+**Recommendation for implementers:**
+
+Do not attempt to pre-compute method indices from assembly metadata.
+Instead, use the first-use/subsequent-use learning protocol described
+in §3.2.1. An implementation that always sends first-use is fully
+compatible and avoids the formula entirely.
 
 ### 3.3 First-Use Format (first_use = 1)
 
@@ -245,8 +333,8 @@ name hash so the receiver can register it.
 | 104 (= 13×8) | 8 | length_indicator: `method_id_bits / 4` |
 | 112–159 | 48 | class GUID = `0c 93 b2 76 d5 b1` |
 | 160+ | var | method hash (method_id_bits - 48 bits) |
-| after hash +0 | 4 | method_tag (unknown derivation, values 0/4/8/C) |
-| +4 | 16 | zeros |
+| after hash +0 | 4 | method_tag = `method_index & 0x0F` (low nibble of subsequent-use index) |
+| +4 | 16 | reserved (must be zero) |
 | +20 | 16 | remaining_bit_count = param_bits + 19 + target_bits |
 | +36 | 16 | user_rpc_constant (see §3.6) |
 | +52 | 4 | RPCMode |
@@ -265,12 +353,12 @@ where the +4 accounts for the RPCMode field; params start after RPCMode
 ### 3.3.1 First-Use Internal Metadata (52 bits)
 
 The 52-bit metadata block after the method hash parallels the subsequent-use
-format's suffix (both share the zeros + remaining_count + constant pattern):
+format's suffix (both share the reserved + remaining_count + constant pattern):
 
 | Offset | Width | Field | Description |
 |--------|-------|-------|-------------|
-| 0 | 4 | method_tag | Method-specific, constant across sessions. Values observed: 0x0, 0x4, 0x8, 0xC. Derivation unknown (not a simple function of method name, hash, .NET metadata token, or parameter types). |
-| 4 | 16 | zeros | Always 0 |
+| 0 | 4 | method_tag | Low nibble of the method's subsequent-use `method_index`: `method_index & 0x0F`. Since `method_index = position × 4`, the tag cycles through 0x0, 0x4, 0x8, 0xC as position increments. |
+| 4 | 16 | reserved | Must be zero; Unity rejects RPCs with non-zero values |
 | 20 | 16 | remaining_bit_count | `param_bits + 19 + target_bits + relay_bits` (where target_bits = 1 for RPCMode.Player, 0 otherwise; relay_bits = 5 if relayed, 0 otherwise). Same formula as subsequent-use. |
 | 36 | 16 | user_rpc_constant | Same value as subsequent-use (see §3.6) |
 
@@ -280,8 +368,9 @@ This is the same value as `total_bits - 121` in subsequent-use encoding.
 When the message is a relay (§3.7), add 5 to account for the relay padding.
 
 Unity accepts `method_tag = 0` when receiving first-use RPCs, so an encoder
-that sets it to 0 will function correctly. However, subsequent-use encoding
-(pre-registering method indices) is preferred for reliability.
+that always sets it to 0 will function correctly. The correct value is
+`method_index & 0x0F`, but since method_index may not be known when
+encoding first-use (see §3.2.1), zero is a safe default.
 
 ### 3.3.2 Method Identifier Derivation (GUID + Hash)
 

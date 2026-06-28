@@ -2,7 +2,7 @@
 """
 Python server for ConstantDeliveryExperiment.
 
-Sends RPCs with various user_rpc_constant values to test whether
+Sends RPCs with various target_view values to test whether
 the constant affects RPC delivery to Unity clients.
 
 Usage:
@@ -92,7 +92,7 @@ try:
         server._rpc_sent_methods[client_addr] = set()
         server.send_rpc('RPC_Int', [param], target=client_addr,
                         mode=RPCMode.Server, view_id=0,
-                        user_rpc_constant=const)
+                        target_view=const)
         poll_server(server, 10)
 
     log.info(f"All {len(CONSTANT_TESTS)} RPCs sent. Waiting for client to finish...")

@@ -412,9 +412,9 @@ export class RakNetClient {
     await this.socket.close();
   }
 
-  send(payload: Uint8Array, reliability: Reliability): void {
+  send(payload: Uint8Array, reliability: Reliability, bitLength?: number): void {
     if (this.reliability) {
-      this.reliability.queueOutgoing(payload, reliability);
+      this.reliability.queueOutgoing(payload, reliability, 0, bitLength);
     }
   }
 

@@ -89,8 +89,8 @@ def test_send_rpc_filtered_by_group():
 
         server.set_sending_enabled(addr, 1, False)
 
-        server.send_rpc('RPC_Int', [42], target=addr, view_id=0)
-        server.send_rpc('RPC_Int', [99], target=addr, view_id=1)
+        server.send_rpc('RPC_Int', [42], target=addr, view_id=0, target_view=0x2000)
+        server.send_rpc('RPC_Int', [99], target=addr, view_id=1, target_view=0x2000)
 
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -150,8 +150,8 @@ def test_recv_rpc_filtered_by_group():
 
         server.set_receiving_enabled(addr, 1, False)
 
-        client.send_rpc('RPC_Int', [42], view_id=0)
-        client.send_rpc('RPC_Int', [99], view_id=1)
+        client.send_rpc('RPC_Int', [42], view_id=0, target_view=0x2000)
+        client.send_rpc('RPC_Int', [99], view_id=1, target_view=0x2000)
 
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -176,8 +176,8 @@ def test_broadcast_rpc_filtered_by_group():
         server.set_view_group(1, 1)
         server.set_sending_enabled(addr, 1, False)
 
-        server.send_rpc('RPC_Int', [42], view_id=0)
-        server.send_rpc('RPC_Int', [99], view_id=1)
+        server.send_rpc('RPC_Int', [42], view_id=0, target_view=0x2000)
+        server.send_rpc('RPC_Int', [99], view_id=1, target_view=0x2000)
 
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:

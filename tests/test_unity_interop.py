@@ -47,16 +47,16 @@ def main():
 
         # Send some RPCs to the Unity server (view_id=0 = first scene-baked NetworkView)
         print("Sending RPC_Int(42)...")
-        client.send_rpc('RPC_Int', [42], view_id=0)
+        client.send_rpc('RPC_Int', [42], view_id=0, target_view=0x2000)
 
         print("Sending RPC_Int(99)...")
-        client.send_rpc('RPC_Int', [99], view_id=0)
+        client.send_rpc('RPC_Int', [99], view_id=0, target_view=0x2000)
 
         print("Sending RPC_Float(3.14)...")
-        client.send_rpc('RPC_Float', [3.14], view_id=0)
+        client.send_rpc('RPC_Float', [3.14], view_id=0, target_view=0x2000)
 
         print("Sending RPC_String('hello from python')...")
-        client.send_rpc('RPC_String', ['hello from python'], view_id=0)
+        client.send_rpc('RPC_String', ['hello from python'], view_id=0, target_view=0x2000)
 
         # Poll for a few seconds to receive any responses
         print("Polling for responses...")

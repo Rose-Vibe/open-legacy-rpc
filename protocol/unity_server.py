@@ -149,7 +149,7 @@ class UnityServer:
         return group not in disabled
 
     def send_rpc(self, method_name, params=None, target=None,
-                 mode=RPCMode.All, view_id=0, user_rpc_constant=None,
+                 mode=RPCMode.All, view_id=0, *, target_view,
                  relay=False):
         """Send an RPC to one or all clients. Respects group filtering."""
         params = params or []
@@ -157,12 +157,12 @@ class UnityServer:
         if target:
             if self._is_send_enabled(target, view_id):
                 self._send_rpc_to(target, method_name, params, view_id, mode,
-                                  user_rpc_constant, relay=relay)
+                                  target_view, relay=relay)
         else:
             for addr in list(self._raknet.peers.keys()):
                 if self._is_send_enabled(addr, view_id):
                     self._send_rpc_to(addr, method_name, params, view_id, mode,
-                                      user_rpc_constant, relay=relay)
+                                      target_view, relay=relay)
 
     def send_state_sync(self, view_id, data_bs, target=None, is_first=False,
                         view_id_scope='scene'):
@@ -175,12 +175,14 @@ class UnityServer:
         if target:
             if self._is_send_enabled(target, view_id):
                 self._raknet.send_to(target, payload,
-                                     Reliability.UNRELIABLE_SEQUENCED)
+                                     Reliability.UNRELIABLE_SEQUENCED,
+                                     bit_length=bits)
         else:
             for addr in list(self._raknet.peers.keys()):
                 if self._is_send_enabled(addr, view_id):
                     self._raknet.send_to(addr, payload,
-                                         Reliability.UNRELIABLE_SEQUENCED)
+                                         Reliability.UNRELIABLE_SEQUENCED,
+                                         bit_length=bits)
 
     def send_delta_state_sync(self, view_id, field_values, field_widths,
                               target=None, view_id_scope='scene'):
@@ -214,7 +216,8 @@ class UnityServer:
             field_widths, is_first, view_id_scope=scope)
 
         self._delta_state[key] = list(field_values)
-        self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED)
+        self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED,
+                             bit_length=bits)
 
     def poll(self, timeout=0.0):
         """Poll for incoming messages. Dispatches to registered handlers."""
@@ -240,7 +243,7 @@ class UnityServer:
                 peer.check_retransmits()
 
     def _send_rpc_to(self, addr, method_name, params, view_id, mode,
-                     user_rpc_constant=None, relay=False):
+                     target_view, relay=False):
         if addr not in self._rpc_sent_methods:
             self._rpc_sent_methods[addr] = set()
         if addr not in self._rpc_counters:
@@ -253,14 +256,15 @@ class UnityServer:
         if method_name not in sent:
             payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant, relay=relay)
+                target_view=target_view, relay=relay)
             sent.add(method_name)
         else:
             payload, bits = encode_rpc_subsequent(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant, relay=relay)
+                target_view=target_view, relay=relay)
 
-        self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED)
+        self._raknet.send_to(addr, payload, Reliability.RELIABLE_ORDERED,
+                             bit_length=bits)
 
     def _handle_rpc(self, addr, payload, bit_length):
         try:

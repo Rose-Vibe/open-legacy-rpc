@@ -78,7 +78,13 @@ export function registerMethodNames(names: string[]): void {
   }
 }
 
-/** Compute 7-bit method index from .NET metadata RID. */
+/**
+ * Approximate 7-bit method index from .NET metadata RID.
+ * This formula is known to be imprecise when the assembly contains multiple
+ * MonoBehaviour subclasses or non-RPC methods interleaved with RPC methods.
+ * Prefer learnMethodIndex() (dynamic learning from first-use/subsequent-use
+ * pairs) for production use.
+ */
 export function computeMethodIndex(methodRid: number, interfaceMethodCount: number): number {
   return (methodRid - 1 - interfaceMethodCount) * 4;
 }

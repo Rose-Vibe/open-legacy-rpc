@@ -69,7 +69,7 @@ def main():
 
         elif phase == 1 and now - last_action > 1.0:
             log.info('Broadcasting RPC_Int(999) to all clients')
-            server.send_rpc('RPC_Int', params=[999])
+            server.send_rpc('RPC_Int', params=[999], target_view=0x2000)
             phase = 2
             last_action = now
 
@@ -77,7 +77,7 @@ def main():
             for i, (addr, pidx) in enumerate(connected_clients.items()):
                 val = (i + 1) * 111
                 log.info(f'Sending targeted RPC_Int({val}) to player {pidx} at {addr}')
-                server.send_rpc('RPC_Int', params=[val], target=addr)
+                server.send_rpc('RPC_Int', params=[val], target=addr, target_view=0x2000)
             phase = 3
             last_action = now
 
@@ -85,7 +85,7 @@ def main():
             for i, (addr, pidx) in enumerate(connected_clients.items()):
                 msg = f'hello_player_{i+1}'
                 log.info(f'Sending targeted RPC_String("{msg}") to player {pidx}')
-                server.send_rpc('RPC_String', params=[msg], target=addr)
+                server.send_rpc('RPC_String', params=[msg], target=addr, target_view=0x2000)
             phase = 4
             last_action = now
 

@@ -140,8 +140,28 @@ def register_method_index_table(method_entries):
             INDEX_TO_METHOD[idx] = name
             register_method_names([name])
 
+def register_method_indices(indices):
+    """Register method indices for game-specific RPC methods.
+
+    indices: dict mapping method name to 7-bit wire-format index.
+    Use scripts/extract-method-indices.sh on the game's Assembly-CSharp.dll
+    to compute these values, then pass the result here.
+
+    Example:
+        register_method_indices({
+            'ReceiveStaticTargetedEvent': 0xa8,
+            'ReceiveBroadcastAllEvent': 0xd0,
+        })
+    """
+    global METHOD_INDEX_MAP, INDEX_TO_METHOD
+    for name, idx in indices.items():
+        METHOD_INDEX_MAP[name] = idx
+        INDEX_TO_METHOD[idx] = name
+        METHOD_TAG_MAP[name] = idx & 0x0F
+    register_method_names(list(indices.keys()))
+
+
 INTERNAL_RPC_CONSTANT = 0x0000
-USER_RPC_CONSTANT = 0x2000
 
 INTERNAL_RPCS = {
     '__RPCNetworkInstantiate',
@@ -289,8 +309,18 @@ def decode_rpc_view_constant(constant):
     return ('scene', constant >> 1)
 
 
+def _resolve_target_view(tv):
+    """Resolve a target_view argument to a 16-bit routing constant.
+
+    Accepts an int (raw constant) or a dict with 'scope' and 'id' keys.
+    """
+    if isinstance(tv, int):
+        return tv
+    return rpc_view_constant(tv['scope'], tv['id'])
+
+
 def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
-                          mode=RPCMode.Server, user_rpc_constant=None,
+                          mode=RPCMode.Server, *, target_view,
                           relay=False):
     """Encode a subsequent-use RPC (method already registered on receiver)."""
     method_index = METHOD_INDEX_MAP.get(method_name)
@@ -326,7 +356,7 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     # remaining_bit_count = total_bit_length - 121
     remaining = total_bits - 121
     bs.write_u16_be(remaining)
-    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else (user_rpc_constant if user_rpc_constant is not None else USER_RPC_CONSTANT)
+    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else _resolve_target_view(target_view)
     bs.write_u16_be(constant)
     # RPCMode (4 bits)
     bs.write_bits(int(mode), 4)
@@ -344,7 +374,7 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
 
 
 def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
-                         mode=RPCMode.Server, user_rpc_constant=None,
+                         mode=RPCMode.Server, *, target_view,
                          relay=False):
     """Encode a first-use RPC (includes method name hash)."""
     class_guid, method_hash = get_method_id(method_name)
@@ -383,7 +413,7 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
     bs.write_u16_be(remaining_count)
-    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else (user_rpc_constant if user_rpc_constant is not None else USER_RPC_CONSTANT)
+    constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else _resolve_target_view(target_view)
     bs.write_u16_be(constant)
     # RPCMode (4 bits)
     bs.write_bits(int(mode), 4)

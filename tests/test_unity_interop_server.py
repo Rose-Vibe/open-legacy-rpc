@@ -29,7 +29,7 @@ def main():
         client_addr[0] = addr
 
         print("Sending RPC_Int(777) to client...")
-        server.send_rpc('RPC_Int', [777], target=addr, mode=RPCMode.All)
+        server.send_rpc('RPC_Int', [777], target=addr, mode=RPCMode.All, target_view=0x2000)
 
     def on_disconnect(addr, player_idx):
         print(f"Client disconnected: {addr} (player {player_idx})")
@@ -106,7 +106,7 @@ def main():
                 elif sync_tick == 90:
                     print("Sending RPC_Int(555) to client...")
                     server.send_rpc('RPC_Int', [555], target=client_addr[0],
-                                    mode=RPCMode.All)
+                                    mode=RPCMode.All, target_view=0x2000)
 
         print(f"\nResults: received {len(received_rpcs)} RPCs from Unity client")
         for method, val in received_rpcs:

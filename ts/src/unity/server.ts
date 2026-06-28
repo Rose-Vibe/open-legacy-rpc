@@ -10,6 +10,7 @@ import {
   isRpc,
   getBuiltinMethodNames,
   hasMethodIndex,
+  learnMethodIndex,
   RpcMode,
 } from './rpc.js';
 import type { RpcParam } from './rpc.js';
@@ -39,6 +40,7 @@ export class UnityServer {
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private rpcSentMethods = new Map<string, Set<string>>();
+  private rpcReceivedFirstUse = new Map<string, string[]>();
   private rpcCounters = new Map<string, number>();
   private syncTimestamp = 0;
   private deltaState = new Map<string, number[]>();
@@ -59,6 +61,7 @@ export class UnityServer {
 
     this.raknet.onDisconnect((session) => {
       this.rpcSentMethods.delete(session.id);
+      this.rpcReceivedFirstUse.delete(session.id);
       this.rpcCounters.delete(session.id);
       for (const key of this.deltaState.keys()) {
         if (key.startsWith(session.id + ':')) {
@@ -115,7 +118,7 @@ export class UnityServer {
     target: ClientSession,
     def: RpcDefinition<T>,
     args: T,
-    options?: { viewId?: number; mode?: RpcMode },
+    options: { viewId?: number; mode?: RpcMode; targetView: ViewId | number },
   ): void {
     def.zodSchema.parse(args);
     const params = argsToRpcParams(def, args);
@@ -125,7 +128,7 @@ export class UnityServer {
   broadcastTypedRpc<T>(
     def: RpcDefinition<T>,
     args: T,
-    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode },
+    options: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; targetView: ViewId | number },
   ): void {
     def.zodSchema.parse(args);
     const params = argsToRpcParams(def, args);
@@ -140,23 +143,23 @@ export class UnityServer {
     target: ClientSession,
     methodName: string,
     params: RpcParam[],
-    options?: { viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
+    options: { viewId?: number; mode?: RpcMode; targetView: ViewId | number; relay?: boolean },
   ): void {
-    const viewId = options?.viewId ?? 1;
-    const mode = options?.mode ?? RpcMode.Server;
-    this.sendRpcTo(target, methodName, params, viewId, mode, options?.userRpcConstant, options?.relay);
+    const viewId = options.viewId ?? 1;
+    const mode = options.mode ?? RpcMode.Server;
+    this.sendRpcTo(target, methodName, params, viewId, mode, options.targetView, options.relay);
   }
 
   broadcastRpc(
     methodName: string,
     params: RpcParam[],
-    options?: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; userRpcConstant?: number; relay?: boolean },
+    options: { exclude?: ClientSession; viewId?: number; mode?: RpcMode; targetView: ViewId | number; relay?: boolean },
   ): void {
-    const viewId = options?.viewId ?? 1;
-    const mode = options?.mode ?? RpcMode.All;
+    const viewId = options.viewId ?? 1;
+    const mode = options.mode ?? RpcMode.All;
     for (const session of this.raknet.clients.values()) {
-      if (options?.exclude && session.id === options.exclude.id) continue;
-      this.sendRpcTo(session, methodName, params, viewId, mode, options?.userRpcConstant, options?.relay);
+      if (options.exclude && session.id === options.exclude.id) continue;
+      this.sendRpcTo(session, methodName, params, viewId, mode, options.targetView, options.relay);
     }
   }
 
@@ -211,7 +214,7 @@ export class UnityServer {
     params: RpcParam[],
     viewId: number,
     mode: RpcMode,
-    userRpcConstant?: number,
+    targetView: ViewId | number,
     relay?: boolean,
   ): void {
     let sent = this.rpcSentMethods.get(session.id);
@@ -224,7 +227,7 @@ export class UnityServer {
     this.rpcCounters.set(session.id, counter + 1);
 
     let result: { data: Uint8Array; bitLength: number };
-    const opts = { methodName, params, viewId, rpcCounter: counter, mode, ...(userRpcConstant !== undefined && { userRpcConstant }), ...(relay && { relay }) };
+    const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
     if (sent.has(methodName) && hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent(opts);
     } else {
@@ -252,6 +255,21 @@ export class UnityServer {
     } catch {
       return;
     }
+
+    if (decoded.firstUse && decoded.methodName !== 'unknown') {
+      const queue = this.rpcReceivedFirstUse.get(session.id) ?? [];
+      queue.push(decoded.methodName);
+      this.rpcReceivedFirstUse.set(session.id, queue);
+    } else if (!decoded.firstUse && decoded.methodIndex !== undefined &&
+               decoded.methodName.startsWith('unknown_0x')) {
+      const queue = this.rpcReceivedFirstUse.get(session.id);
+      if (queue && queue.length > 0) {
+        const pending = queue.shift()!;
+        learnMethodIndex(pending, decoded.methodIndex);
+        decoded.methodName = pending;
+      }
+    }
+
     (session as ClientSession & { lastRpcViewId?: number }).lastRpcViewId = decoded.viewId;
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {

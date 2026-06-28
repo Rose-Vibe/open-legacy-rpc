@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract user_rpc_constant from Unity RPC pcap captures.
+Extract target_view from Unity RPC pcap captures.
 
 Usage:
     python3 scripts/extract-rpc-constants.py <pcap-file> [<pcap-file>...]

@@ -72,7 +72,7 @@ class UnityClient:
         self._state_sync_handlers[view_id] = handler
 
     def send_rpc(self, method_name, params=None, view_id=1,
-                 mode=RPCMode.Server, user_rpc_constant=None,
+                 mode=RPCMode.Server, *, target_view,
                  relay=False):
         """Send an RPC to the server."""
         params = params or []
@@ -82,15 +82,15 @@ class UnityClient:
         if method_name not in self._rpc_sent_methods:
             payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant, relay=relay)
+                target_view=target_view, relay=relay)
             self._rpc_sent_methods.add(method_name)
         else:
             payload, bits = encode_rpc_subsequent(
                 method_name, params, view_id, counter, mode,
-                user_rpc_constant=user_rpc_constant, relay=relay)
+                target_view=target_view, relay=relay)
 
-        msg = _make_bit_message(payload, bits, Reliability.RELIABLE_ORDERED)
-        self._raknet.send_message(msg.payload, msg.reliability)
+        self._raknet.send_message(payload, Reliability.RELIABLE_ORDERED,
+                                  bit_length=bits)
 
     def poll(self, timeout=0.0):
         """Poll for incoming messages. Dispatches to registered handlers."""
@@ -141,12 +141,3 @@ class UnityClient:
             handler(result)
 
 
-class _BitMessage:
-    def __init__(self, payload, bit_length, reliability):
-        self.payload = payload
-        self.bit_length = bit_length
-        self.reliability = reliability
-
-
-def _make_bit_message(payload, bit_length, reliability):
-    return _BitMessage(payload, bit_length, reliability)

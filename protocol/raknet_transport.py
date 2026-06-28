@@ -342,10 +342,10 @@ class RakNetPeer:
             log.debug("send_raw failed to %s: %s", self.remote_addr, e)
 
     def send_message(self, payload, reliability=Reliability.RELIABLE_ORDERED,
-                     ordering_channel=0):
+                     ordering_channel=0, bit_length=None):
         """Send a Unity-layer message with the specified reliability."""
         msg = EncapsulatedMessage(payload, reliability)
-        msg.bit_length = len(payload) * 8
+        msg.bit_length = bit_length if bit_length is not None else len(payload) * 8
 
         if msg.is_reliable:
             msg.reliable_msg_number = self._reliable_send_num

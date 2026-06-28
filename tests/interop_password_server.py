@@ -28,7 +28,7 @@ def main():
     def on_connect(addr, player_idx):
         log.info(f'Client connected: addr={addr}, player_idx={player_idx}')
         connected.append(addr)
-        server.send_rpc('RPC_Int', params=[42], target=addr)
+        server.send_rpc('RPC_Int', params=[42], target=addr, target_view=0x2000)
         log.info('Sent RPC_Int(42)')
 
     server.on_connect(on_connect)

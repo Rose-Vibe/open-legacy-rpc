@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from protocol.raknet_transport import unpack_datagram, unpack_encapsulated
 from protocol.unity_protocol import (
     decode_rpc, encode_rpc_subsequent, encode_rpc_first_use,
-    USER_RPC_CONSTANT, INTERNAL_RPC_CONSTANT,
+    INTERNAL_RPC_CONSTANT,
     compute_method_id, METHOD_INDEX_MAP, METHOD_SIGNATURES,
     RPCMode,
 )
@@ -102,8 +102,8 @@ def extract_rpc_messages(payloads):
     return rpcs, disconnects
 
 
-def check_user_rpc_constant(rpc_entry, verbose=False):
-    """Fix 1: Check USER_RPC_CONSTANT is 0x2000."""
+def check_target_view(rpc_entry, verbose=False):
+    """Fix 1: Check 0x2000 is 0x2000."""
     raw = rpc_entry['raw']
     decoded = rpc_entry.get('decoded')
     if not decoded:
@@ -128,12 +128,12 @@ def check_user_rpc_constant(rpc_entry, verbose=False):
     if method_name in ('__RPCNetworkInstantiate',):
         expected = INTERNAL_RPC_CONSTANT
     else:
-        expected = USER_RPC_CONSTANT
+        expected = 0x2000
 
     ok = const_val == expected
     if verbose or not ok:
         label = 'PASS' if ok else 'FAIL'
-        print(f"  [{label}] Fix 1 (USER_RPC_CONSTANT): {method_name} "
+        print(f"  [{label}] Fix 1 (0x2000): {method_name} "
               f"constant=0x{const_val:04x} expected=0x{expected:04x}")
     return ok
 
@@ -328,10 +328,12 @@ def verify_roundtrip(rpc_entry, verbose=False):
     try:
         if decoded['first_use']:
             our_data, our_bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode)
+                method_name, params, view_id, counter, mode,
+                target_view=0x2000)
         else:
             our_data, our_bits = encode_rpc_subsequent(
-                method_name, params, view_id, counter, mode)
+                method_name, params, view_id, counter, mode,
+                target_view=0x2000)
     except Exception:
         return None
 
@@ -396,16 +398,16 @@ def main():
         else:
             results['fail'] += 1
 
-    # Fix 1: USER_RPC_CONSTANT
-    print("=== Fix 1: USER_RPC_CONSTANT (0x2000) ===")
+    # Fix 1: 0x2000
+    print("=== Fix 1: 0x2000 (0x2000) ===")
     for rpc in decoded_rpcs[:5]:
-        record(check_user_rpc_constant(rpc, args.verbose))
+        record(check_target_view(rpc, args.verbose))
     if len(decoded_rpcs) > 5:
         # Check remaining silently
         for rpc in decoded_rpcs[5:]:
-            r = check_user_rpc_constant(rpc, False)
+            r = check_target_view(rpc, False)
             if r is False:
-                check_user_rpc_constant(rpc, True)
+                check_target_view(rpc, True)
             record(r)
     print()
 

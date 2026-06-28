@@ -139,6 +139,7 @@ describe('UnityServer', () => {
     socket.sent.length = 0;
     server.sendRpc(connectedSession!, 'RPC_Int', [{ type: 'int', value: 42 }], {
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
     vi.advanceTimersByTime(100);
 
@@ -180,6 +181,7 @@ describe('UnityServer', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
 
     const f = createFrame(rpc.data, Reliability.RELIABLE_ORDERED);
@@ -387,7 +389,7 @@ describe('UnityClient', () => {
 
     // Now send an RPC
     socket.sent.length = 0;
-    client.sendRpc('RPC_Int', [{ type: 'int', value: 42 }]);
+    client.sendRpc('RPC_Int', [{ type: 'int', value: 42 }], { targetView: 0x2000 });
     vi.advanceTimersByTime(100);
 
     const dataPkts = socket.sent.filter((p) => {
@@ -445,6 +447,7 @@ describe('UnityClient', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
 
     const fc = createFrame(rpc.data, Reliability.RELIABLE_ORDERED);

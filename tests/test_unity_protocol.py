@@ -6,7 +6,7 @@ from protocol.unity_protocol import (
     encode_state_sync, decode_state_sync, encode_view_id, METHOD_SIGNATURES,
     compute_method_id, method_hash_hex, class_guid_hex,
     compute_method_index, METHOD_INDEX_MAP,
-    INTERNAL_RPCS, INTERNAL_RPC_CONSTANT, USER_RPC_CONSTANT,
+    INTERNAL_RPCS, INTERNAL_RPC_CONSTANT,
     lookup_method_by_hash,
     encode_view_id_16, decode_view_id_16,
     encode_instantiate_group_flags, decode_instantiate_group_flags,
@@ -26,7 +26,7 @@ def test_rpc_subsequent_decode_known():
     # From a captured RPC_Int(42) subsequent-use message
     # bit_length varies, but we know the structure
     # Build a subsequent RPC_Int(42) and verify decode round-trips
-    payload, bits = encode_rpc_subsequent('RPC_Int', [42], mode=RPCMode.Server)
+    payload, bits = encode_rpc_subsequent('RPC_Int', [42], mode=RPCMode.Server, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['method_name'] == 'RPC_Int'
     assert result['rpc_mode'] == RPCMode.Server
@@ -36,21 +36,21 @@ def test_rpc_subsequent_decode_known():
 
 def test_rpc_subsequent_roundtrip_int():
     for val in [0, 1, -1, 42, 2147483647, -2147483648]:
-        payload, bits = encode_rpc_subsequent('RPC_Int', [val], mode=RPCMode.Server)
+        payload, bits = encode_rpc_subsequent('RPC_Int', [val], mode=RPCMode.Server, target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert result['params'] == [val], f"Failed for {val}"
 
 
 def test_rpc_subsequent_roundtrip_float():
     for val in [0.0, 1.0, -1.5, 3.14]:
-        payload, bits = encode_rpc_subsequent('RPC_Float', [val], mode=RPCMode.Server)
+        payload, bits = encode_rpc_subsequent('RPC_Float', [val], mode=RPCMode.Server, target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert abs(result['params'][0] - val) < 1e-5, f"Failed for {val}"
 
 
 def test_rpc_subsequent_roundtrip_vector3():
     v = (1.0, 2.0, 3.0)
-    payload, bits = encode_rpc_subsequent('RPC_Vector3', [v], mode=RPCMode.All)
+    payload, bits = encode_rpc_subsequent('RPC_Vector3', [v], mode=RPCMode.All, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['rpc_mode'] == RPCMode.All
     rv = result['params'][0]
@@ -60,7 +60,7 @@ def test_rpc_subsequent_roundtrip_vector3():
 
 def test_rpc_subsequent_roundtrip_quaternion():
     q = (0.5, 0.183, 0.5, 0.683)
-    payload, bits = encode_rpc_subsequent('RPC_Quaternion', [q], mode=RPCMode.Others)
+    payload, bits = encode_rpc_subsequent('RPC_Quaternion', [q], mode=RPCMode.Others, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['rpc_mode'] == RPCMode.Others
     rq = result['params'][0]
@@ -70,21 +70,22 @@ def test_rpc_subsequent_roundtrip_quaternion():
 
 def test_rpc_subsequent_roundtrip_string():
     for s in ['hello', '', 'Hello World!', 'x' * 100]:
-        payload, bits = encode_rpc_subsequent('RPC_String', [s], mode=RPCMode.Server)
+        payload, bits = encode_rpc_subsequent('RPC_String', [s], mode=RPCMode.Server, target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert result['params'][0] == s, f"Failed for {s!r}"
 
 
 def test_rpc_subsequent_roundtrip_bytes():
     for data in [b'', b'\x00\x01\x02', b'\xff' * 50]:
-        payload, bits = encode_rpc_subsequent('RPC_Bytes', [data], mode=RPCMode.Server)
+        payload, bits = encode_rpc_subsequent('RPC_Bytes', [data], mode=RPCMode.Server, target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert result['params'][0] == data
 
 
 def test_rpc_subsequent_roundtrip_multi_param():
     payload, bits = encode_rpc_subsequent(
-        'RPC_IntFloatString', [42, 3.14, 'hello'], mode=RPCMode.All)
+        'RPC_IntFloatString', [42, 3.14, 'hello'], mode=RPCMode.All,
+        target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['params'][0] == 42
     assert abs(result['params'][1] - 3.14) < 1e-5
@@ -92,7 +93,7 @@ def test_rpc_subsequent_roundtrip_multi_param():
 
 
 def test_rpc_first_use_roundtrip_int():
-    payload, bits = encode_rpc_first_use('RPC_Int', [99], mode=RPCMode.Server)
+    payload, bits = encode_rpc_first_use('RPC_Int', [99], mode=RPCMode.Server, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['first_use'] is True
     assert result['method_name'] == 'RPC_Int'
@@ -102,7 +103,7 @@ def test_rpc_first_use_roundtrip_int():
 
 
 def test_rpc_first_use_roundtrip_string():
-    payload, bits = encode_rpc_first_use('RPC_String', ['test'], mode=RPCMode.All)
+    payload, bits = encode_rpc_first_use('RPC_String', ['test'], mode=RPCMode.All, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['first_use'] is True
     assert result['method_name'] == 'RPC_String'
@@ -111,7 +112,8 @@ def test_rpc_first_use_roundtrip_string():
 
 def test_rpc_first_use_roundtrip_multi_param():
     payload, bits = encode_rpc_first_use(
-        'RPC_IntFloatString', [10, -2.5, 'abc'], mode=RPCMode.OthersBuffered)
+        'RPC_IntFloatString', [10, -2.5, 'abc'], mode=RPCMode.OthersBuffered,
+        target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['first_use'] is True
     assert result['method_name'] == 'RPC_IntFloatString'
@@ -124,14 +126,14 @@ def test_rpc_first_use_roundtrip_multi_param():
 def test_rpc_modes():
     for mode in [RPCMode.Server, RPCMode.Others, RPCMode.All,
                  RPCMode.OthersBuffered, RPCMode.AllBuffered]:
-        payload, bits = encode_rpc_subsequent('RPC_Int', [1], mode=mode)
+        payload, bits = encode_rpc_subsequent('RPC_Int', [1], mode=mode, target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert result['rpc_mode'] == mode, f"Failed for {mode}"
 
 
 def test_first_use_metadata_remaining_count():
     """First-use metadata contains correct remaining_bit_count."""
-    payload, bits = encode_rpc_first_use('RPC_Int', [42], view_id=0, rpc_counter=0)
+    payload, bits = encode_rpc_first_use('RPC_Int', [42], view_id=0, rpc_counter=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in payload)
 
     # Method hash for RPC_Int is 'd456' (2 bytes), method_id_bits = (6+2)*8 = 64
@@ -154,9 +156,9 @@ def test_first_use_metadata_remaining_count():
 def test_first_use_metadata_with_variable_params():
     """Remaining count adjusts for variable-length params."""
     # Short string
-    payload1, bits1 = encode_rpc_first_use('RPC_String', ['hi'])
+    payload1, bits1 = encode_rpc_first_use('RPC_String', ['hi'], target_view=0x2000)
     # Longer string
-    payload2, bits2 = encode_rpc_first_use('RPC_String', ['hello world'])
+    payload2, bits2 = encode_rpc_first_use('RPC_String', ['hello world'], target_view=0x2000)
     assert bits1 != bits2  # different param sizes
 
     # Both should round-trip correctly
@@ -272,7 +274,7 @@ def test_method_id_different_names_different_hashes():
 
 def test_first_use_roundtrip_computed_hash():
     """First-use RPC with computed hash round-trips correctly."""
-    payload, bits = encode_rpc_first_use('RPC_Alpha', [77])
+    payload, bits = encode_rpc_first_use('RPC_Alpha', [77], target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['first_use'] is True
     assert result['method_name'] == 'RPC_Alpha'
@@ -311,6 +313,7 @@ def test_first_use_arbitrary_method_name():
     METHOD_SIGNATURES['MyCustomRPC'] = ['int']
     try:
         payload, bits = encode_rpc_first_use('MyCustomRPC', [42],
+                                                 target_view=0x2000,
                                              mode=RPCMode.Server)
         result = decode_rpc(payload, bits)
         assert result['first_use'] is True
@@ -341,7 +344,7 @@ def test_internal_rpc_constant_zero():
     """First-use encoding of internal RPCs uses constant=0x0000."""
     METHOD_SIGNATURES['__RPCNetworkInstantiate'] = ['int']
     try:
-        payload, bits = encode_rpc_first_use('__RPCNetworkInstantiate', [0])
+        payload, bits = encode_rpc_first_use('__RPCNetworkInstantiate', [0], target_view=0x2000)
         all_bits = ''.join(f'{b:08b}' for b in payload)
         # Find the constant field: it's 36 bits into the metadata block
         # metadata starts after method hash
@@ -357,14 +360,14 @@ def test_internal_rpc_constant_zero():
         del METHOD_SIGNATURES['__RPCNetworkInstantiate']
 
 
-def test_user_rpc_constant_0x2000():
+def test_target_view_0x2000():
     """First-use encoding of user RPCs uses constant=0x2000."""
-    payload, bits = encode_rpc_first_use('RPC_Int', [42])
+    payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in payload)
     meta_start = 176  # known for RPC_Int
     const_start = meta_start + 36
     const_bits = all_bits[const_start:const_start + 16]
-    assert int(const_bits, 2) == USER_RPC_CONSTANT
+    assert int(const_bits, 2) == 0x2000
 
 
 def test_rpc_network_view_id_hash():
@@ -380,14 +383,14 @@ def test_rpc_network_view_id_index():
 
 def test_rpc_network_view_id_roundtrip():
     """NetworkViewID RPC param round-trips as 16-bit value."""
-    payload, bits = encode_rpc_subsequent('RPC_NetworkViewID', [0x0004])
+    payload, bits = encode_rpc_subsequent('RPC_NetworkViewID', [0x0004], target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['params'] == [0x0004]
 
 
 def test_rpc_network_player_roundtrip():
     """NetworkPlayer RPC param round-trips as int32."""
-    payload, bits = encode_rpc_subsequent('RPC_NetworkPlayer', [1])
+    payload, bits = encode_rpc_subsequent('RPC_NetworkPlayer', [1], target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['params'] == [1]
 
@@ -434,7 +437,7 @@ def test_network_player_hash():
 def test_network_player_is_int32():
     """NetworkPlayer wire values match int32 BE for player indices 0 and 1."""
     for player_idx in [0, 1]:
-        payload, bits = encode_rpc_subsequent('RPC_NetworkPlayer', [player_idx])
+        payload, bits = encode_rpc_subsequent('RPC_NetworkPlayer', [player_idx], target_view=0x2000)
         result = decode_rpc(payload, bits)
         assert result['params'] == [player_idx]
 
@@ -508,6 +511,7 @@ def test_instantiate_group_flags_matches_capture():
 def test_invalid_rpc_mode_does_not_crash():
     """Decoding an RPC with an invalid RPCMode value should not crash."""
     data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=0,
+                                           target_view=0x2000,
                                        mode=RPCMode.Server)
     # Tamper with the mode nibble at the known bit position (136)
     # For subsequent-use, mode is at bit 136. Set to value 4 (invalid).
@@ -521,19 +525,19 @@ def test_invalid_rpc_mode_does_not_crash():
 
 def test_encode_params_zero_values_not_treated_as_missing():
     """Encoding int=0, float=0.0, string='' should produce real values, not defaults."""
-    data_int, bits_int = encode_rpc_subsequent('RPC_Int', [0], view_id=1, rpc_counter=0)
+    data_int, bits_int = encode_rpc_subsequent('RPC_Int', [0], view_id=1, rpc_counter=0, target_view=0x2000)
     decoded_int = decode_rpc(data_int, bits_int)
     assert decoded_int['params'][0] == 0
 
-    data_float, bits_float = encode_rpc_subsequent('RPC_Float', [0.0], view_id=1, rpc_counter=0)
+    data_float, bits_float = encode_rpc_subsequent('RPC_Float', [0.0], view_id=1, rpc_counter=0, target_view=0x2000)
     decoded_float = decode_rpc(data_float, bits_float)
     assert decoded_float['params'][0] == 0.0
 
-    data_str, bits_str = encode_rpc_subsequent('RPC_String', [''], view_id=1, rpc_counter=0)
+    data_str, bits_str = encode_rpc_subsequent('RPC_String', [''], view_id=1, rpc_counter=0, target_view=0x2000)
     decoded_str = decode_rpc(data_str, bits_str)
     assert decoded_str['params'][0] == ''
 
-    data_bytes, bits_bytes = encode_rpc_subsequent('RPC_Bytes', [b''], view_id=1, rpc_counter=0)
+    data_bytes, bits_bytes = encode_rpc_subsequent('RPC_Bytes', [b''], view_id=1, rpc_counter=0, target_view=0x2000)
     decoded_bytes = decode_rpc(data_bytes, bits_bytes)
     assert decoded_bytes['params'][0] == b''
 
@@ -541,7 +545,7 @@ def test_encode_params_zero_values_not_treated_as_missing():
 def test_rpc_counter_overflow_wraps_at_32768():
     """RPC counter wraps at 32768 (16-bit, *2)."""
     for counter in [0, 100, 32767, 32768, 50000, 65535]:
-        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
         decoded = decode_rpc(data, bits)
         assert decoded['rpc_counter'] == counter % 32768, \
             f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
@@ -550,7 +554,7 @@ def test_rpc_counter_overflow_wraps_at_32768():
 def test_rpc_counter_overflow_first_use():
     """First-use encoding also wraps counter at 32768."""
     for counter in [0, 127, 128, 32767, 32768, 50000]:
-        data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
         decoded = decode_rpc(data, bits)
         assert decoded['rpc_counter'] == counter % 32768, \
             f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
@@ -588,7 +592,7 @@ def test_bytes_param_size_limit():
     from protocol.unity_protocol import MAX_BYTES_PARAM_SIZE
     # Build a minimal RPC payload with a bytes param whose count exceeds the limit
     # Use encode_rpc_subsequent for RPC_Bytes, then tamper with the count field
-    payload, bits = encode_rpc_subsequent('RPC_Bytes', [b'\x00'], 1, 0, RPCMode.Server)
+    payload, bits = encode_rpc_subsequent('RPC_Bytes', [b'\x00'], 1, 0, RPCMode.Server, target_view=0x2000)
     result = decode_rpc(payload, bits)
     assert result['method_name'] == 'RPC_Bytes'
     assert result['params'][0] == b'\x00'
@@ -597,7 +601,7 @@ def test_bytes_param_size_limit():
     bs = BitStream(payload, bits)
     # Find where the bytes count is and replace it with a huge value
     # Easier: construct a minimal bitstream manually
-    payload2, bits2 = encode_rpc_subsequent('RPC_Bytes', [b''], 1, 0, RPCMode.Server)
+    payload2, bits2 = encode_rpc_subsequent('RPC_Bytes', [b''], 1, 0, RPCMode.Server, target_view=0x2000)
     # Replace the 4-byte count (value 0) with MAX_BYTES_PARAM_SIZE + 1
     import pytest
     bs2 = BitStream(payload2, bits2)
@@ -622,7 +626,7 @@ def test_method_tag_registration():
     """Registering a method_tag puts it into first-use encoding."""
     register_method_tag('RPC_Int', 8)
     try:
-        payload, bits = encode_rpc_first_use('RPC_Int', [42])
+        payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
         all_bits = ''.join(f'{b:08b}' for b in payload)
         guid, hash_val = compute_method_id('RPC_Int')
         method_id_bits = (len(guid) + len(hash_val)) * 8
@@ -638,7 +642,7 @@ def test_method_tag_registration():
 def test_method_tag_defaults_to_zero():
     """Unregistered methods use method_tag=0."""
     METHOD_TAG_MAP.pop('RPC_Int', None)
-    payload, bits = encode_rpc_first_use('RPC_Int', [42])
+    payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in payload)
     guid, hash_val = compute_method_id('RPC_Int')
     method_id_bits = (len(guid) + len(hash_val)) * 8
@@ -662,20 +666,15 @@ def test_register_method_tags_bulk():
 def test_16bit_counter_high_values():
     """Counter values up to 32767 survive encode→decode roundtrip."""
     for counter in [255, 256, 1000, 16383, 32767]:
-        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter)
+        data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
         decoded = decode_rpc(data, bits)
         assert decoded['rpc_counter'] == counter, \
             f"counter={counter}: got {decoded['rpc_counter']}"
 
 
-def test_user_rpc_constant_value():
-    """USER_RPC_CONSTANT is 0x2000."""
-    assert USER_RPC_CONSTANT == 0x2000
-
-
 def test_subsequent_remaining_bit_count():
     """Subsequent-use remaining count is total_bits - 121."""
-    data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, rpc_counter=0)
+    data, bits = encode_rpc_subsequent('RPC_Void', [], view_id=1, rpc_counter=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in data)
     remaining_bits = all_bits[104:120]
     remaining = int(remaining_bits, 2)
@@ -685,7 +684,7 @@ def test_subsequent_remaining_bit_count():
 
 def test_first_use_remaining_bit_count():
     """First-use remaining count is param_bits + 19 + target_bits."""
-    data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=0)
+    data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=0, target_view=0x2000)
     all_bits = ''.join(f'{b:08b}' for b in data)
     guid, hash_val = compute_method_id('RPC_Int')
     method_id_bits = (len(guid) + len(hash_val)) * 8

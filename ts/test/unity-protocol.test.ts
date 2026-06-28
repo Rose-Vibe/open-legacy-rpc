@@ -8,6 +8,7 @@ import {
   encodeRpcFirstUse,
   decodeRpc,
   isRpc,
+  learnMethodIndex,
   RpcMode,
 } from '../src/unity/rpc.js';
 import {
@@ -91,6 +92,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
 
     expect(encoded.bitLength).toBeGreaterThan(0);
@@ -103,6 +105,51 @@ describe('RPC Encode/Decode', () => {
     expect(decoded.firstUse).toBe(false);
     expect(decoded.viewId).toBe(1);
     expect(decoded.params).toEqual([42]);
+    expect(decoded.methodIndex).toBeDefined();
+  });
+
+  it('subsequent-use decode returns methodIndex', () => {
+    const encoded = encodeRpcSubsequent({
+      methodName: 'RPC_Void',
+      params: [],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+      targetView: 0x2000,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.methodIndex).toBeDefined();
+    expect(decoded.methodName).toBe('RPC_Void');
+  });
+
+  it('first-use decode has no methodIndex', () => {
+    const encoded = encodeRpcFirstUse({
+      methodName: 'RPC_Void',
+      params: [],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+      targetView: 0x2000,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.methodIndex).toBeUndefined();
+    expect(decoded.firstUse).toBe(true);
+  });
+
+  it('learnMethodIndex registers unknown index for future decoding', () => {
+    const fakeIndex = 0x04;
+    learnMethodIndex('TestDynamic', fakeIndex);
+    const encoded = encodeRpcSubsequent({
+      methodName: 'TestDynamic',
+      params: [],
+      viewId: 1,
+      rpcCounter: 0,
+      mode: RpcMode.Server,
+      targetView: 0x2000,
+    });
+    const decoded = decodeRpc(encoded.data, encoded.bitLength);
+    expect(decoded.methodName).toBe('TestDynamic');
+    expect(decoded.methodIndex).toBe(fakeIndex);
   });
 
   it('encodes and decodes a first-use RPC', () => {
@@ -112,6 +159,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 1,
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
 
     expect(encoded.data[0]).toBe(0x1b);
@@ -131,6 +179,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     expect(isRpc(encoded.data)).toBe(true);
   });
@@ -142,6 +191,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 5,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.rpcCounter).toBe(5);
@@ -154,6 +204,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual([-42]);
@@ -166,6 +217,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params[0]).toBeCloseTo(-1.5);
@@ -178,6 +230,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual(['hello world']);
@@ -190,6 +243,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual(['']);
@@ -202,6 +256,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     const v = decoded.params[0] as number[];
@@ -217,6 +272,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     const q = decoded.params[0] as number[];
@@ -233,6 +289,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params[0]).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
@@ -245,6 +302,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params[0]).toEqual(new Uint8Array(0));
@@ -257,6 +315,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual([42]);
@@ -269,6 +328,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual([7]);
@@ -285,6 +345,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params[0]).toBe(100);
@@ -299,6 +360,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.params).toEqual([]);
@@ -315,6 +377,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 5,
       rpcCounter: 0,
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.methodName).toBe('RPC_IntFloatString');
@@ -332,6 +395,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Player,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.rpcMode).toBe('Player');
@@ -345,6 +409,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 12345,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.viewId).toBe(12345);
@@ -357,6 +422,7 @@ describe('RPC Encode/Decode', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     // Corrupt the method index byte (byte 10, which contains the 1-bit first_use flag + 7-bit index)
     // Set to a method index that doesn't exist (0xfe = index 0xfe)
@@ -440,6 +506,7 @@ describe('RPC counter overflow', () => {
         viewId: 1,
         rpcCounter: counter,
         mode: RpcMode.Server,
+        targetView: 0x2000,
       });
 
     const r0 = encode(0);
@@ -463,6 +530,7 @@ describe('RPC counter overflow', () => {
         viewId: 1,
         rpcCounter: i,
         mode: RpcMode.Server,
+        targetView: 0x2000,
       });
       const decoded = decodeRpc(result.data, result.bitLength);
       expect(decoded.rpcCounter).toBe(i % 32768);
@@ -477,6 +545,7 @@ describe('RPC counter overflow', () => {
       viewId: 1,
       rpcCounter: 200,
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(r200.data, r200.bitLength);
     expect(decoded.rpcCounter).toBe(200);
@@ -492,6 +561,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toBeNaN();
@@ -504,6 +574,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toBe(Infinity);
@@ -516,6 +587,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toBe(-Infinity);
@@ -528,6 +600,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(Object.is(decoded.params[0], -0)).toBe(true);
@@ -540,6 +613,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     const vec = decoded.params[0] as number[];
@@ -557,6 +631,7 @@ describe('Float edge values', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toBeCloseTo(denorm, 50);
@@ -607,6 +682,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toEqual([0, 0, 0]);
@@ -619,6 +695,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toEqual([0, 0, 0, 0]);
@@ -631,6 +708,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toBe(-2147483648);
@@ -641,6 +719,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 1,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded2 = decodeRpc(result2.data, result2.bitLength);
     expect(decoded2.params[0]).toBe(2147483647);
@@ -653,6 +732,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(result.data, result.bitLength);
     expect(decoded.params[0]).toEqual(new Uint8Array(0));
@@ -706,6 +786,7 @@ describe('Encoding edge cases', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     // Corrupt the method hash bytes (bytes after the length indicator)
     const data = new Uint8Array(result.data);
@@ -726,6 +807,7 @@ describe('RPC modes and relay', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Others,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.rpcMode).toBe('Others');
@@ -739,6 +821,7 @@ describe('RPC modes and relay', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.All,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.rpcMode).toBe('All');
@@ -750,11 +833,13 @@ describe('RPC modes and relay', () => {
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+      targetView: 0x2000,
     });
     const relay = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      targetView: 0x2000,
     });
     expect(relay.bitLength - normal.bitLength).toBe(5);
   });
@@ -764,11 +849,13 @@ describe('RPC modes and relay', () => {
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Others,
+      targetView: 0x2000,
     });
     const relay = encodeRpcFirstUse({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      targetView: 0x2000,
     });
     expect(relay.bitLength - normal.bitLength).toBe(5);
   });
@@ -778,6 +865,7 @@ describe('RPC modes and relay', () => {
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Others, relay: true,
+      targetView: 0x2000,
     });
     const decoded = decodeRpc(relay.data, relay.bitLength);
     expect(decoded.methodName).toBe('RPC_Int');
@@ -785,12 +873,12 @@ describe('RPC modes and relay', () => {
     expect(decoded.rpcMode).toBe('Others');
   });
 
-  it('userRpcConstant overrides default 0x2000', () => {
+  it('targetView encodes in wire format', () => {
     const encoded = encodeRpcSubsequent({
       methodName: 'RPC_Int',
       params: [{ type: 'int', value: 42 }],
       viewId: 1, rpcCounter: 0, mode: RpcMode.Server,
-      userRpcConstant: 0x2640,
+      targetView: 0x2640,
     });
     const bits = [...encoded.data].map(b => b.toString(2).padStart(8, '0')).join('');
     const constVal = parseInt(bits.slice(120, 136), 2);
@@ -842,6 +930,7 @@ describe('bytes param size limit', () => {
       viewId: 1,
       rpcCounter: 0,
       mode: RpcMode.Server,
+      targetView: 0x2000,
     });
     // The count field is 4 bytes (u32 big-endian) right after the mode bits
     // Find the 4 zero bytes that represent count=0 and replace with a huge value

@@ -1,6 +1,7 @@
 import { BitStream } from '../bitstream.js';
 import { encodeStringForWire, decodeString } from '../huffman.js';
-import { encodeViewId } from './view-id.js';
+import { encodeViewId, rpcViewConstantFromVid } from './view-id.js';
+import type { ViewId } from './view-id.js';
 import {
   getMethodId,
   lookupMethodByHash,
@@ -37,8 +38,7 @@ export const RPC_MODE_FROM_NAME: Record<string, RpcMode> = {
 
 const MSG_ID_RPC = 0x1b;
 const MAX_BYTES_PARAM_SIZE = 1_048_576;
-const INTERNAL_RPC_CONSTANT = 0x0000;
-const USER_RPC_CONSTANT = 0x2000;
+export const INTERNAL_RPC_CONSTANT = 0x0000;
 
 const INTERNAL_RPCS = new Set(['__RPCNetworkInstantiate']);
 
@@ -108,6 +108,7 @@ function registerLoaderAssembly(): void {
     const idx = computeMethodIndex(rid, INTERFACE_METHODS);
     METHOD_INDEX_MAP.set(name, idx);
     INDEX_TO_METHOD.set(idx, name);
+    METHOD_TAG_MAP.set(name, idx & 0x0F);
   }
   registerMethodNames(Object.keys(METHOD_SIGNATURES));
   registerMethodNames([...INTERNAL_RPCS]);
@@ -123,14 +124,49 @@ export function hasMethodIndex(methodName: string): boolean {
   return METHOD_INDEX_MAP.has(methodName);
 }
 
+/** Register a method index learned from observing first-use / subsequent-use pairs. */
+export function learnMethodIndex(methodName: string, index: number): void {
+  if (INDEX_TO_METHOD.has(index)) return;
+  METHOD_INDEX_MAP.set(methodName, index);
+  INDEX_TO_METHOD.set(index, methodName);
+  METHOD_TAG_MAP.set(methodName, index & 0x0F);
+}
+
+/**
+ * Register method indices for game-specific RPC methods.
+ *
+ * Each entry maps an RPC method name to its 7-bit wire-format index.
+ * Use scripts/extract-method-indices.sh on the game's Assembly-CSharp.dll
+ * to compute these values, then pass the result here.
+ *
+ * Example:
+ *   registerMethodIndices({
+ *     ReceiveStaticTargetedEvent: 0xa8,
+ *     ReceiveBroadcastAllEvent: 0xd0,
+ *   });
+ */
+export function registerMethodIndices(indices: Record<string, number>): void {
+  for (const [name, idx] of Object.entries(indices)) {
+    METHOD_INDEX_MAP.set(name, idx);
+    INDEX_TO_METHOD.set(idx, name);
+    METHOD_TAG_MAP.set(name, idx & 0x0F);
+  }
+  registerMethodNames(Object.keys(indices));
+}
+
 export interface RpcEncodeOptions {
   methodName: string;
   params: RpcParam[];
   viewId: number;
   rpcCounter: number;
   mode: RpcMode;
-  userRpcConstant?: number;
+  /** Which NetworkView receives this RPC. Accepts a ViewId or a raw 16-bit constant. */
+  targetView: ViewId | number;
   relay?: boolean;
+}
+
+function resolveTargetView(tv: ViewId | number): number {
+  return typeof tv === 'number' ? tv : rpcViewConstantFromVid(tv);
 }
 
 /** Encode a subsequent-use RPC (method already registered on receiver). */
@@ -164,7 +200,7 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   bs.writeU16BE(0);
   const remaining = totalBits - 121;
   bs.writeU16BE(remaining);
-  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : (opts.userRpcConstant ?? USER_RPC_CONSTANT);
+  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : resolveTargetView(opts.targetView);
   bs.writeU16BE(constant);
   bs.writeBits(opts.mode, 4);
   if (opts.mode === RpcMode.Player) {
@@ -218,7 +254,7 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);
   bs.writeU16BE(remainingCount);
-  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : (opts.userRpcConstant ?? USER_RPC_CONSTANT);
+  const constant = INTERNAL_RPCS.has(opts.methodName) ? INTERNAL_RPC_CONSTANT : resolveTargetView(opts.targetView);
   bs.writeU16BE(constant);
   bs.writeBits(opts.mode, 4);
   if (opts.mode === RpcMode.Player) {
@@ -241,6 +277,8 @@ export interface DecodedRpc {
   params: unknown[];
   classGuid?: string;
   methodHash?: string;
+  /** Raw 7-bit method index from subsequent-use messages (absent on first-use). */
+  methodIndex?: number;
 }
 
 /** Decode a Unity RPC message from raw payload bytes. */
@@ -286,6 +324,7 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   } else {
     bs.pos = 80;
     const methodIndexByte = bs.readBits(8) & 0xfe;
+    result.methodIndex = methodIndexByte;
     result.methodName =
       INDEX_TO_METHOD.get(methodIndexByte) ??
       `unknown_0x${methodIndexByte.toString(16).padStart(2, '0')}`;
