@@ -543,7 +543,7 @@ describe('Delta State Sync', () => {
 });
 
 describe('RPC counter overflow', () => {
-  it('counter wraps at 32768 (16-bit field, *2)', () => {
+  it('counter wraps at 65536 (16-bit field)', () => {
     const encode = (counter: number) =>
       encodeRpcSubsequent({
         methodName: 'RPC_Int',
@@ -559,12 +559,14 @@ describe('RPC counter overflow', () => {
     const r128 = encode(128);
     const r32767 = encode(32767);
     const r32768 = encode(32768);
+    const r65536 = encode(65536);
 
     expect(decodeRpc(r0.data, r0.bitLength).rpcCounter).toBe(0);
     expect(decodeRpc(r127.data, r127.bitLength).rpcCounter).toBe(127);
     expect(decodeRpc(r128.data, r128.bitLength).rpcCounter).toBe(128);
     expect(decodeRpc(r32767.data, r32767.bitLength).rpcCounter).toBe(32767);
-    expect(decodeRpc(r32768.data, r32768.bitLength).rpcCounter).toBe(0); // wraps
+    expect(decodeRpc(r32768.data, r32768.bitLength).rpcCounter).toBe(32768);
+    expect(decodeRpc(r65536.data, r65536.bitLength).rpcCounter).toBe(0); // wraps
   });
 
   it('counter values 0-500 all encode/decode correctly', () => {
@@ -578,7 +580,7 @@ describe('RPC counter overflow', () => {
         targetView: 0x2000,
       });
       const decoded = decodeRpc(result.data, result.bitLength);
-      expect(decoded.rpcCounter).toBe(i % 32768);
+      expect(decoded.rpcCounter).toBe(i % 65536);
       expect(decoded.methodName).toBe('RPC_Void');
     }
   });

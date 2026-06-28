@@ -62,14 +62,17 @@ export class RakNetServer {
   private messageHandlers: Array<EventHandler<[ClientSession, IncomingMessage]>> = [];
   private tickTimer: ReturnType<typeof setInterval> | null = null;
 
+  private readonly epochNs: bigint;
+
   constructor(
     socket: UdpSocket,
-    options: { port: number; password?: string; viewIdStride?: number },
+    options: { port: number; password?: string; viewIdStride?: number; epochNs?: bigint },
   ) {
     this.socket = socket;
     this.port = options.port;
     this.password = options.password ?? '';
     this.viewIdStride = options.viewIdStride ?? 50;
+    this.epochNs = options.epochNs ?? process.hrtime.bigint();
   }
 
   async start(): Promise<void> {
@@ -127,8 +130,17 @@ export class RakNetServer {
     return this.sessions;
   }
 
+  private pingCounter = 0;
+
   private tick(): void {
+    this.pingCounter++;
     for (const session of this.sessions.values()) {
+      if (session.state === ConnectionState.CONNECTED && this.pingCounter % 15 === 0) {
+        const ping = new Uint8Array(9);
+        ping[0] = 0x00;
+        writeU32BE(ping, 5, session.reliability.getTimestampMs());
+        session.reliability.queueOutgoing(ping, Reliability.UNRELIABLE);
+      }
       const packets = session.reliability.getOutgoingPackets();
       for (const p of packets) {
         this.socket.sendTo(p, session.address.host, session.address.port);
@@ -215,7 +227,7 @@ export class RakNetServer {
         viewIdBase: 0,
         viewIdEnd: 0,
         state: ConnectionState.CONNECTING,
-        reliability: new ReliabilityLayer(remote),
+        reliability: new ReliabilityLayer(remote, this.epochNs),
       });
     }
   }
@@ -236,13 +248,13 @@ export class RakNetServer {
       }
     }
 
-    const buf = new Uint8Array(1 + 6 + 2 + 6 + 6 + 6 + 8 * 6);
+    const buf = new Uint8Array(1 + 6 + 2 + 10 * 6);
     buf[0] = 0x0e;
     buf.set(encodeAddress(session.address.host, session.address.port), 1);
     buf.set(encodeAddress('127.0.0.1', this.port), 9);
     buf.set(encodeAddress('127.0.0.1', this.port), 15);
     buf.set(encodeAddress('127.0.0.1', this.port), 21);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 7; i++) {
       buf.set(encodeAddress('0.0.0.0', 65535), 27 + i * 6);
     }
     session.reliability.queueOutgoing(buf, Reliability.RELIABLE_ORDERED);
@@ -283,12 +295,11 @@ export class RakNetServer {
   }
 
   private handlePing(session: ClientSession, payload: Uint8Array): void {
-    if (payload.length < 5) return;
-    const pingTime = readU32BE(payload, 1);
+    if (payload.length < 9) return;
     const pong = new Uint8Array(17);
     pong[0] = 0x03;
-    writeU32BE(pong, 1, pingTime);
-    writeU32BE(pong, 5, session.reliability.getTimestamp());
+    pong.set(payload.subarray(1, 9), 1);
+    writeU32BE(pong, 13, session.reliability.getTimestampMs());
     session.reliability.queueOutgoing(pong, Reliability.UNRELIABLE);
   }
 }
@@ -561,12 +572,11 @@ export class RakNetClient {
   }
 
   private handlePing(payload: Uint8Array): void {
-    if (!this.reliability || payload.length < 5) return;
-    const pingTime = readU32BE(payload, 1);
+    if (!this.reliability || payload.length < 9) return;
     const pong = new Uint8Array(17);
     pong[0] = 0x03;
-    writeU32BE(pong, 1, pingTime);
-    writeU32BE(pong, 5, this.reliability.getTimestamp());
+    pong.set(payload.subarray(1, 9), 1);
+    writeU32BE(pong, 13, this.reliability.getTimestampMs());
     this.reliability.queueOutgoing(pong, Reliability.UNRELIABLE);
   }
 }

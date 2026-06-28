@@ -172,7 +172,7 @@ def decode_rpc(payload, bit_length):
     result['invocation_meta'] = br.read_bits(24)
 
     counter_byte = (result['invocation_meta'] >> 16) & 0xFF
-    result['rpc_counter'] = counter_byte // 2
+    result['rpc_counter'] = counter_byte
 
     first_use = br.read_bit()
     result['first_use'] = bool(first_use)

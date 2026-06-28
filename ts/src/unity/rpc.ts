@@ -194,7 +194,7 @@ export function encodeRpcSubsequent(opts: RpcEncodeOptions): {
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
   bs.writeBytes(encodeViewId(opts.viewId));
-  const counter16 = (opts.rpcCounter * 2) & 0xffff;
+  const counter16 = opts.rpcCounter & 0xffff;
   bs.writeU8((counter16 >> 8) & 0xff);
   bs.writeU8(counter16 & 0xff);
   bs.writeU8(0x0b);
@@ -240,7 +240,7 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
   bs.writeBytes(encodeViewId(opts.viewId));
-  const counter16 = (opts.rpcCounter * 2) & 0xffff;
+  const counter16 = opts.rpcCounter & 0xffff;
   bs.writeU8((counter16 >> 8) & 0xff);
   bs.writeU8(counter16 & 0xff);
   bs.writeU8(0x0b);
@@ -295,7 +295,7 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
   const viewId = viewIdHi * 0x100000000 + viewIdMid * 0x10000 + viewIdLo;
   const counterHigh = bs.readU8();
   const counterLow = bs.readU8();
-  const rpcCounter = ((counterHigh << 8) | counterLow) >> 1;
+  const rpcCounter = (counterHigh << 8) | counterLow;
   bs.readBits(8); // 0x0b marker
   const firstUse = bs.readBit() === 1;
 

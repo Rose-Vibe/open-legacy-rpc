@@ -33,6 +33,8 @@ export interface UnityServerOptions {
   sendBatchIndices?: boolean;
   /** Use peer-supplied BATCH indices for subsequent-use encoding (default true). */
   usePeerBatchIndices?: boolean;
+  /** Epoch for timestamps (process.hrtime.bigint() nanoseconds). All datagram and ping timestamps are relative to this. */
+  epochNs?: bigint;
 }
 
 export interface StateSyncMessage extends DecodedStateSync {
@@ -47,7 +49,6 @@ export class UnityServer {
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private rpcReceivedFirstUse = new Map<string, string[]>();
-  private rpcCounters = new Map<string, number>();
   private peerIndices = new Map<string, Map<string, number>>();
   private ourIndices = new Map<string, number>();
   private ourIndexReverse = new Map<number, string>();
@@ -56,26 +57,27 @@ export class UnityServer {
   private deltaState = new Map<string, number[]>();
   private readonly sendBatchIndices: boolean;
   private readonly usePeerBatchIndices: boolean;
+  private readonly epochNs: bigint;
 
   constructor(socket: UdpSocket, options: UnityServerOptions) {
-    const rakOpts: { port: number; password?: string; viewIdStride?: number } = {
+    const rakOpts: { port: number; password?: string; viewIdStride?: number; epochNs?: bigint } = {
       port: options.port,
     };
     if (options.password !== undefined) rakOpts.password = options.password;
     if (options.viewIdStride !== undefined) rakOpts.viewIdStride = options.viewIdStride;
+    if (options.epochNs !== undefined) rakOpts.epochNs = options.epochNs;
     this.raknet = new RakNetServer(socket, rakOpts);
+    this.epochNs = options.epochNs ?? process.hrtime.bigint();
     this.sendBatchIndices = options.sendBatchIndices ?? true;
     this.usePeerBatchIndices = options.usePeerBatchIndices ?? true;
 
     this.raknet.onConnect((session) => {
-      this.rpcCounters.set(session.id, 0);
       this.peerIndices.set(session.id, new Map());
       for (const h of this.connectHandlers) h(session);
     });
 
     this.raknet.onDisconnect((session) => {
       this.rpcReceivedFirstUse.delete(session.id);
-      this.rpcCounters.delete(session.id);
       this.peerIndices.delete(session.id);
       for (const key of this.deltaState.keys()) {
         if (key.startsWith(session.id + ':')) {
@@ -231,11 +233,11 @@ export class UnityServer {
     targetView: ViewId | number,
     relay?: boolean,
   ): void {
-    const counter = this.rpcCounters.get(session.id) ?? 0;
-    this.rpcCounters.set(session.id, counter + 1);
+    const uptimeMs = Number((process.hrtime.bigint() - this.epochNs) / 1_000_000n);
+    const rpcTimestamp = uptimeMs & 0xffff;
 
     let result: { data: Uint8Array; bitLength: number };
-    const opts = { methodName, params, viewId, rpcCounter: counter, mode, targetView, ...(relay && { relay }) };
+    const opts = { methodName, params, viewId, rpcCounter: rpcTimestamp, mode, targetView, ...(relay && { relay }) };
     const peerIdx = this.usePeerBatchIndices
       ? this.peerIndices.get(session.id)?.get(methodName)
       : undefined;

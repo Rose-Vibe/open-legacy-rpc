@@ -344,8 +344,8 @@ def encode_rpc_subsequent(method_name, params, view_id=1, rpc_counter=0,
     bs.write_u8(MSG_ID_RPC)
     # ViewID (48 bits)
     bs.write_bytes(encode_view_id(view_id))
-    # Counter (16-bit): (rpc_counter * 2) split into high/low bytes
-    counter16 = (rpc_counter * 2) & 0xFFFF
+    # Counter (16-bit): raw RakNetGetTimeMS() & 0xFFFF
+    counter16 = rpc_counter & 0xFFFF
     bs.write_u8((counter16 >> 8) & 0xFF)
     bs.write_u8(counter16 & 0xFF)
     bs.write_u8(0x0b)
@@ -397,8 +397,8 @@ def encode_rpc_first_use(method_name, params, view_id=1, rpc_counter=0,
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
     bs.write_bytes(encode_view_id(view_id))
-    # Counter (16-bit): (rpc_counter * 2) split into high/low bytes
-    counter16 = (rpc_counter * 2) & 0xFFFF
+    # Counter (16-bit): raw RakNetGetTimeMS() & 0xFFFF
+    counter16 = rpc_counter & 0xFFFF
     bs.write_u8((counter16 >> 8) & 0xFF)
     bs.write_u8(counter16 & 0xFF)
     bs.write_u8(0x0b)
@@ -440,7 +440,7 @@ def decode_rpc(payload, bit_length):
     result['view_id'] = decode_view_id_bits(bs)
     counter_high = bs.read_u8()
     counter_low = bs.read_u8()
-    result['rpc_counter'] = ((counter_high << 8) | counter_low) >> 1
+    result['rpc_counter'] = (counter_high << 8) | counter_low
     bs.read_bits(8)  # 0x0b marker
     first_use = bs.read_bit()
     result['first_use'] = bool(first_use)

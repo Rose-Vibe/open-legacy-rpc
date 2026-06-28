@@ -28,7 +28,7 @@ GOLDEN = {
                    'rpcCounter': 0, 'mode': RPCMode.Server},
     },
     'sub_int_42_c500': {
-        'hex': '1b00000000000103e80b5400000033200000000002a0',
+        'hex': '1b00000000000101f40b5400000033200000000002a0',
         'bits': 172,
         'params': {'methodName': 'RPC_Int', 'params': [42], 'viewId': 1,
                    'rpcCounter': 500, 'mode': RPCMode.Server},
@@ -291,10 +291,10 @@ def test_target_view_0x2000_in_wire():
 
 
 def test_16bit_counter_in_wire():
-    """Counter=500 is encoded as 16-bit value 0x03E8 in the wire format."""
+    """Counter=500 is encoded as raw 16-bit value 0x01F4 in the wire format."""
     data, _ = _encode(GOLDEN['sub_int_42_c500'])
-    assert data[7] == 0x03  # high byte
-    assert data[8] == 0xE8  # low byte
+    assert data[7] == 0x01  # high byte
+    assert data[8] == 0xF4  # low byte
 
 
 GOLDEN_BATCH = {

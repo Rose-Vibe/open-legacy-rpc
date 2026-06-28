@@ -27,20 +27,29 @@ export class ReliabilityLayer {
   private splitAssembler: Map<number, SplitState> = new Map();
   private splitIdCounter = 0;
   private pendingAcks: number[] = [];
+  private lastReceivedTimestamp = 0;
   private unackedReliable: Map<number, UnackedEntry> = new Map();
   private outgoingQueue: Frame[] = [];
   private seenReliable: Set<number> = new Set();
   private seenReliableMin = 0;
   private readonly remoteAddress: AddressInfo;
-  private readonly connectTime: number;
+  private readonly epochNs: bigint;
 
-  constructor(remoteAddress: AddressInfo) {
+  constructor(remoteAddress: AddressInfo, epochNs?: bigint) {
     this.remoteAddress = remoteAddress;
-    this.connectTime = Date.now();
+    this.epochNs = epochNs ?? process.hrtime.bigint();
+  }
+
+  getTimestampMs(): number {
+    return Number((process.hrtime.bigint() - this.epochNs) / 1_000_000n) & 0xffffffff;
   }
 
   getTimestamp(): number {
-    return (Date.now() - this.connectTime) & 0xffffffff;
+    return Number((process.hrtime.bigint() - this.epochNs) / 1_000n) & 0xffffffff;
+  }
+
+  getLastReceivedTimestamp(): number {
+    return this.lastReceivedTimestamp;
   }
 
   queueOutgoing(payload: Uint8Array, reliability: Reliability, orderingChannel = 0, bitLength?: number): void {
@@ -65,7 +74,7 @@ export class ReliabilityLayer {
     const packets: Uint8Array[] = [];
 
     if (this.pendingAcks.length > 0) {
-      packets.push(buildAck(this.pendingAcks, this.getTimestamp()));
+      packets.push(buildAck(this.pendingAcks, this.lastReceivedTimestamp));
       this.pendingAcks = [];
     }
 
@@ -102,6 +111,7 @@ export class ReliabilityLayer {
         return [];
       case 'data':
         this.pendingAcks.push(parsed.sequenceNumber);
+        this.lastReceivedTimestamp = parsed.timestamp;
         if (parsed.sequenceNumber > this.recvSeqMax) {
           this.recvSeqMax = parsed.sequenceNumber;
         }

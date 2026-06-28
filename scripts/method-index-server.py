@@ -66,7 +66,7 @@ def make_subsequent_with_index(method_name, params, method_index, view_id=0,
     bs = BitStream()
     bs.write_u8(0x1b)  # MSG_ID_RPC
     bs.write_bytes(encode_view_id(view_id))
-    counter16 = (rpc_counter * 2) & 0xFFFF
+    counter16 = rpc_counter & 0xFFFF
     bs.write_u8((counter16 >> 8) & 0xFF)
     bs.write_u8(counter16 & 0xFF)
     bs.write_u8(0x0b)

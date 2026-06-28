@@ -543,22 +543,22 @@ def test_encode_params_zero_values_not_treated_as_missing():
     assert decoded_bytes['params'][0] == b''
 
 
-def test_rpc_counter_overflow_wraps_at_32768():
-    """RPC counter wraps at 32768 (16-bit, *2)."""
-    for counter in [0, 100, 32767, 32768, 50000, 65535]:
+def test_rpc_counter_overflow_wraps_at_65536():
+    """RPC counter wraps at 65536 (16-bit field, raw ms)."""
+    for counter in [0, 100, 32767, 32768, 50000, 65535, 65536]:
         data, bits = encode_rpc_subsequent('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 32768, \
-            f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
+        assert decoded['rpc_counter'] == counter % 65536, \
+            f"counter={counter}: expected {counter % 65536}, got {decoded['rpc_counter']}"
 
 
 def test_rpc_counter_overflow_first_use():
-    """First-use encoding also wraps counter at 32768."""
-    for counter in [0, 127, 128, 32767, 32768, 50000]:
+    """First-use encoding also wraps counter at 65536."""
+    for counter in [0, 127, 128, 32767, 32768, 50000, 65536]:
         data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, rpc_counter=counter, target_view=0x2000)
         decoded = decode_rpc(data, bits)
-        assert decoded['rpc_counter'] == counter % 32768, \
-            f"counter={counter}: expected {counter % 32768}, got {decoded['rpc_counter']}"
+        assert decoded['rpc_counter'] == counter % 65536, \
+            f"counter={counter}: expected {counter % 65536}, got {decoded['rpc_counter']}"
 
 
 def test_float_denorm_roundtrip():
