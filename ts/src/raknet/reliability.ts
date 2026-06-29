@@ -22,6 +22,7 @@ export class ReliabilityLayer {
   private recvSeqMax = -1;
   private reliableSendNum = 0;
   private orderingIndexOut: Map<number, number> = new Map();
+  private sequencingIndexOut: Map<number, number> = new Map();
   private orderingIndexIn: Map<number, number> = new Map();
   private orderingQueues: Map<number, Map<number, Frame>> = new Map();
   private splitAssembler: Map<number, SplitState> = new Map();
@@ -61,10 +62,12 @@ export class ReliabilityLayer {
 
     if (isOrdered(reliability)) {
       const ch = orderingChannel;
-      const idx = this.orderingIndexOut.get(ch) ?? 0;
+      const isSequenced = reliability === Reliability.UNRELIABLE_SEQUENCED || reliability === Reliability.RELIABLE_SEQUENCED;
+      const counterMap = isSequenced ? this.sequencingIndexOut : this.orderingIndexOut;
+      const idx = counterMap.get(ch) ?? 0;
       frame.orderingIndex = idx;
       frame.orderingChannel = ch;
-      this.orderingIndexOut.set(ch, idx + 1);
+      counterMap.set(ch, idx + 1);
     }
 
     this.outgoingQueue.push(frame);
@@ -356,8 +359,10 @@ export class ReliabilityLayer {
 
     let orderingIndex: number | null = null;
     if (isOrdered(reliability)) {
-      orderingIndex = this.orderingIndexOut.get(orderingChannel) ?? 0;
-      this.orderingIndexOut.set(orderingChannel, orderingIndex + 1);
+      const isSequenced = reliability === Reliability.UNRELIABLE_SEQUENCED || reliability === Reliability.RELIABLE_SEQUENCED;
+      const counterMap = isSequenced ? this.sequencingIndexOut : this.orderingIndexOut;
+      orderingIndex = counterMap.get(orderingChannel) ?? 0;
+      counterMap.set(orderingChannel, orderingIndex + 1);
     }
 
     const frames: Frame[] = [];
