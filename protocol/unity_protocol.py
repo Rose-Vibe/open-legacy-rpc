@@ -703,8 +703,8 @@ def encode_state_sync(view_id, timestamp, data_bs, is_first=False,
     """
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
-    bs.write_bytes(b'\x00' * 6)  # 48-bit reserved field
-    bs.write_u16_be(timestamp)
+    bs.write_u32_be((timestamp >> 32) & 0xFFFFFFFF)
+    bs.write_u32_be(timestamp & 0xFFFFFFFF)
     bs.write_u8(0x80 if is_first else 0x7f)
     bs.write_u16_be(encode_view_id_16(view_id_scope, view_id))
 
@@ -723,8 +723,9 @@ def decode_state_sync(payload, bit_length):
     bs = BitStream(payload, bit_length)
     result = {}
     result['msg_id'] = bs.read_u8()
-    result['_reserved'] = bs.read_bits(48)
-    result['timestamp'] = bs.read_u16_be()
+    ts_hi = bs.read_u32_be()
+    ts_lo = bs.read_u32_be()
+    result['timestamp'] = (ts_hi << 32) | ts_lo
     result['flags'] = bs.read_u8()
     result['is_first'] = result['flags'] == 0x80
     view_id_16 = bs.read_u16_be()
@@ -750,8 +751,8 @@ def encode_delta_state_sync(view_id, timestamp, field_values, prev_values,
     """
     bs = BitStream()
     bs.write_u8(MSG_ID_RPC)
-    bs.write_bytes(b'\x00' * 6)  # 48-bit reserved field
-    bs.write_u16_be(timestamp)
+    bs.write_u32_be((timestamp >> 32) & 0xFFFFFFFF)
+    bs.write_u32_be(timestamp & 0xFFFFFFFF)
     bs.write_u8(0x80 if is_first else 0x7f)
     bs.write_u16_be(encode_view_id_16(view_id_scope, view_id))
 

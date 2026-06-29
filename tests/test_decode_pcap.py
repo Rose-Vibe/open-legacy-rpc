@@ -221,7 +221,7 @@ def test_state_sync_decode():
     assert result['type'] == 'state_sync'
     assert result['viewId'] == 1
     assert result['isFirst'] is True
-    assert result['timestamp'] == 100
+    assert result['timestampMs'] == 100
     assert result['data']['type'] == 'not_deserialized'
     assert len(result['data']['rawHex']) > 0
 

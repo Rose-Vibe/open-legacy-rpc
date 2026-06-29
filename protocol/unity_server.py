@@ -170,7 +170,7 @@ class UnityServer:
     def send_state_sync(self, view_id, data_bs, target=None, is_first=False,
                         view_id_scope='scene'):
         """Send a state sync message to one or all clients. Respects group filtering."""
-        self._sync_timestamp = (self._sync_timestamp + 83) & 0xFFFF
+        self._sync_timestamp = self._sync_timestamp + 83
         payload, bits = encode_state_sync(
             view_id, self._sync_timestamp, data_bs, is_first,
             view_id_scope=view_id_scope)
@@ -195,7 +195,7 @@ class UnityServer:
         field_widths: list of bit widths per field (typically all 32)
         Tracks previous state per-client for dirty flag computation.
         """
-        self._sync_timestamp = (self._sync_timestamp + 83) & 0xFFFF
+        self._sync_timestamp = self._sync_timestamp + 83
         self._view_id_scopes[view_id] = view_id_scope
 
         if target:

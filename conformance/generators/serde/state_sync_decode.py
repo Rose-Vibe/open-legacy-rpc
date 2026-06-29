@@ -51,7 +51,7 @@ def _generate_random(count, rng):
         num_fields = rng.randint(1, 4)
         inp = {
             'viewId': {'scope': rng.choice(['scene', 'allocated']), 'id': rng.randint(0, 5)},
-            'timestamp': rng.randint(0, 65535),
+            'timestamp': rng.randint(0, 0xFFFFFFFF),
             'isFirst': rng.choice([True, False]),
             'fields': [_random_field(rng) for _ in range(num_fields)],
         }

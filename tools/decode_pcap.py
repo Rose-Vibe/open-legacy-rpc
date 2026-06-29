@@ -313,7 +313,7 @@ def decode_state_sync_layer(payload, bit_length):
         'msgId': MSG_ID_RPC,
         'viewId': decoded.get('view_id'),
         'viewIdScope': decoded.get('view_id_scope'),
-        'timestamp': decoded.get('timestamp'),
+        'timestampMs': decoded.get('timestamp'),
         'isFirst': decoded.get('is_first', False),
         'data': {
             'type': 'not_deserialized',

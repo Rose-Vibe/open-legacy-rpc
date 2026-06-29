@@ -78,7 +78,7 @@ def _generate_random(count, rng):
             },
             'input': {
                 'viewId': {'scope': 'scene', 'id': rng.randint(0, 5)},
-                'timestamp': rng.randint(0, 65535), 'isFirst': rng.choice([True, False]),
+                'timestamp': rng.randint(0, 0xFFFFFFFF), 'isFirst': rng.choice([True, False]),
                 'fieldWidths': widths, 'fieldValues': cur, 'prevValues': prev,
             },
         })

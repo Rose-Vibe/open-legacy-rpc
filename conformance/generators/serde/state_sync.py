@@ -108,7 +108,7 @@ def _generate_random(count, rng):
             },
             'input': {
                 'viewId': {'scope': rng.choice(['scene', 'allocated']), 'id': rng.randint(0, 10)},
-                'timestamp': rng.randint(0, 65535),
+                'timestamp': rng.randint(0, 0xFFFFFFFF),
                 'isFirst': rng.choice([True, False]),
                 'fields': [_random_field(rng) for _ in range(num_fields)],
             },

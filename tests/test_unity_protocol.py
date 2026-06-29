@@ -193,10 +193,9 @@ def test_state_sync_encode_matches_capture():
 
     payload, bits = encode_state_sync(1, 0x09b7, data_bs, is_first=False,
                                        view_id_scope='scene')
-    # Header: 1b 000000000000 09b7 7f [view_id_16]
+    # Header: 1b [u64 timestamp BE] 7f [view_id_16]
     assert payload[0] == 0x1b
-    assert payload[1:7] == b'\x00\x00\x00\x00\x00\x00'  # reserved
-    assert payload[7:9] == bytes.fromhex('09b7')
+    assert payload[1:9] == b'\x00\x00\x00\x00\x00\x00\x09\xb7'  # u64 timestamp
     assert payload[9] == 0x7f
     assert payload[10:12] == encode_view_id_16('scene', 1).to_bytes(2, 'big')
     assert payload[12:16] == bytes.fromhex('0000002a')

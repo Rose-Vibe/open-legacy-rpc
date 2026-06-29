@@ -353,7 +353,7 @@ handlers.set('stateSync', (inp) => {
   const fields = inp['fields'] as StateSyncField[];
   const { data, bitLength } = encodeStateSync({
     viewId: vid,
-    timestamp: inp['timestamp'] as number,
+    timestampMs: inp['timestamp'] as number,
     fields,
     isFirst: inp['isFirst'] as boolean,
   });
@@ -363,7 +363,7 @@ handlers.set('stateSync', (inp) => {
 handlers.set('stateSyncDecode', (inp) => {
   const d = decodeStateSync(hexToBytes(inp['dataHex'] as string), inp['bitLength'] as number);
   return {
-    timestamp: d.timestamp,
+    timestamp: d.timestampMs,
     isFirst: d.isFirst,
     viewIdScope: d.viewIdScope,
     viewId: d.viewId,
@@ -374,7 +374,7 @@ handlers.set('deltaStateSync', (inp) => {
   const vid = inp['viewId'] as ViewIdInput;
   const { data, bitLength } = encodeDeltaStateSync({
     viewId: vid,
-    timestamp: inp['timestamp'] as number,
+    timestampMs: inp['timestamp'] as number,
     fieldValues: inp['fieldValues'] as number[],
     prevValues: inp['prevValues'] as number[],
     fieldWidths: inp['fieldWidths'] as number[],
@@ -392,7 +392,7 @@ handlers.set('deltaSyncDecode', (inp) => {
     inp['prevValues'] as number[],
   );
   return {
-    timestamp: d.timestamp,
+    timestamp: d.timestampMs,
     isFirst: d.isFirst,
     dirtyFlags: d.dirtyFlags,
     fieldValues: d.fieldValues,

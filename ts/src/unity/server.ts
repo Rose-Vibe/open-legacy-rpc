@@ -185,10 +185,10 @@ export class UnityServer {
     fields: StateSyncField[],
     options?: { isFirst?: boolean },
   ): void {
-    this.syncTimestamp = (this.syncTimestamp + 83) & 0xffff;
+    this.syncTimestamp = this.syncTimestamp + 83;
     const { data } = encodeStateSync({
       viewId,
-      timestamp: this.syncTimestamp,
+      timestampMs: this.syncTimestamp,
       fields,
       isFirst: options?.isFirst ?? false,
     });
@@ -202,14 +202,14 @@ export class UnityServer {
     fieldWidths: number[],
     _options?: { viewIdScope?: 'scene' | 'allocated' },
   ): void {
-    this.syncTimestamp = (this.syncTimestamp + 83) & 0xffff;
+    this.syncTimestamp = this.syncTimestamp + 83;
     const key = `${target.id}:${String(viewId.id)}`;
     const prev = this.deltaState.get(key) ?? new Array<number>(fieldValues.length).fill(0);
     const isFirst = !this.deltaState.has(key);
 
     const { data } = encodeDeltaStateSync({
       viewId,
-      timestamp: this.syncTimestamp,
+      timestampMs: this.syncTimestamp,
       fieldValues,
       prevValues: prev,
       fieldWidths,

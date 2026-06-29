@@ -11,7 +11,7 @@ export interface StateSyncField {
 
 export interface StateSyncOptions {
   viewId: ViewId;
-  timestamp: number;
+  timestampMs: number;
   fields: StateSyncField[];
   isFirst: boolean;
 }
@@ -26,8 +26,8 @@ export function encodeStateSync(opts: StateSyncOptions): StateSyncResult {
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
-  bs.writeBytes(new Uint8Array(6)); // 48-bit reserved
-  bs.writeU16BE(opts.timestamp);
+  bs.writeU32BE((opts.timestampMs / 0x100000000) >>> 0);
+  bs.writeU32BE(opts.timestampMs >>> 0);
   bs.writeU8(opts.isFirst ? 0x80 : 0x7f);
   bs.writeU16BE(encodeViewId16(opts.viewId.scope, opts.viewId.id));
 
@@ -41,7 +41,7 @@ export function encodeStateSync(opts: StateSyncOptions): StateSyncResult {
 }
 
 export interface DecodedStateSync {
-  timestamp: number;
+  timestampMs: number;
   isFirst: boolean;
   viewIdScope: 'scene' | 'allocated';
   viewId: number;
@@ -50,15 +50,16 @@ export interface DecodedStateSync {
 export function decodeStateSync(payload: Uint8Array, bitLength: number): DecodedStateSync {
   const bs = new BitStream(payload, bitLength);
   bs.readU8(); // msg_id
-  bs.readBits(48); // reserved
-  const timestamp = bs.readU16BE();
+  const tsHi = bs.readU32BE();
+  const tsLo = bs.readU32BE();
+  const timestampMs = tsHi * 0x100000000 + tsLo;
   const flags = bs.readU8();
   const isFirst = flags === 0x80;
   const vid16 = bs.readU16BE();
   const vid = decodeViewId16(vid16);
 
   return {
-    timestamp,
+    timestampMs,
     isFirst,
     viewIdScope: vid.scope,
     viewId: vid.id,
@@ -67,7 +68,7 @@ export function decodeStateSync(payload: Uint8Array, bitLength: number): Decoded
 
 export interface DeltaSyncOptions {
   viewId: ViewId;
-  timestamp: number;
+  timestampMs: number;
   fieldValues: number[];
   prevValues: number[];
   fieldWidths: number[];
@@ -77,8 +78,8 @@ export interface DeltaSyncOptions {
 export function encodeDeltaStateSync(opts: DeltaSyncOptions): StateSyncResult {
   const bs = new BitStream();
   bs.writeU8(MSG_ID_RPC);
-  bs.writeBytes(new Uint8Array(6)); // 48-bit reserved
-  bs.writeU16BE(opts.timestamp);
+  bs.writeU32BE((opts.timestampMs / 0x100000000) >>> 0);
+  bs.writeU32BE(opts.timestampMs >>> 0);
   bs.writeU8(opts.isFirst ? 0x80 : 0x7f);
   bs.writeU16BE(encodeViewId16(opts.viewId.scope, opts.viewId.id));
 
@@ -101,7 +102,7 @@ export function encodeDeltaStateSync(opts: DeltaSyncOptions): StateSyncResult {
 }
 
 export interface DecodedDeltaSync {
-  timestamp: number;
+  timestampMs: number;
   isFirst: boolean;
   dirtyFlags: number[];
   fieldValues: number[];
@@ -116,8 +117,9 @@ export function decodeDeltaStateSync(
 ): DecodedDeltaSync {
   const bs = new BitStream(payload, bitLength);
   bs.readU8(); // msg_id
-  bs.readBits(48); // reserved
-  const timestamp = bs.readU16BE();
+  const tsHi = bs.readU32BE();
+  const tsLo = bs.readU32BE();
+  const timestampMs = tsHi * 0x100000000 + tsLo;
   const flags = bs.readU8();
   const isFirst = flags === 0x80;
   bs.readU16BE(); // viewId16
@@ -132,7 +134,7 @@ export function decodeDeltaStateSync(
     }
   }
 
-  return { timestamp, isFirst, dirtyFlags, fieldValues: values };
+  return { timestampMs, isFirst, dirtyFlags, fieldValues: values };
 }
 
 function buildDataBs(fields: StateSyncField[]): BitStream {

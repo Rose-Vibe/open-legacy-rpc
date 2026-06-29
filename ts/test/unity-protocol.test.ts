@@ -457,7 +457,7 @@ describe('State Sync', () => {
   it('encodes and decodes a state sync message', () => {
     const encoded = encodeStateSync({
       viewId: { scope: 'scene', id: 1 },
-      timestamp: 100,
+      timestampMs: 100,
       fields: [{ type: 'float', value: 1.5 }],
       isFirst: false,
     });
@@ -466,7 +466,7 @@ describe('State Sync', () => {
     expect(encoded.bitLength).toBe(96 + 32);
 
     const decoded = decodeStateSync(encoded.data, encoded.bitLength);
-    expect(decoded.timestamp).toBe(100);
+    expect(decoded.timestampMs).toBe(100);
     expect(decoded.isFirst).toBe(false);
     expect(decoded.viewIdScope).toBe('scene');
     expect(decoded.viewId).toBe(1);
@@ -475,7 +475,7 @@ describe('State Sync', () => {
   it('encodes first state sync with 0x80 flag', () => {
     const encoded = encodeStateSync({
       viewId: { scope: 'scene', id: 1 },
-      timestamp: 0,
+      timestampMs: 0,
       fields: [{ type: 'int', value: 42 }],
       isFirst: true,
     });
@@ -489,7 +489,7 @@ describe('Delta State Sync', () => {
   it('encodes and decodes delta sync', () => {
     const encoded = encodeDeltaStateSync({
       viewId: { scope: 'scene', id: 1 },
-      timestamp: 200,
+      timestampMs: 200,
       fieldValues: [100, 200],
       prevValues: [100, 100],
       fieldWidths: [32, 32],
@@ -498,7 +498,7 @@ describe('Delta State Sync', () => {
 
     const decoded = decodeDeltaStateSync(encoded.data, encoded.bitLength, 2, [32, 32], [100, 100]);
 
-    expect(decoded.timestamp).toBe(200);
+    expect(decoded.timestampMs).toBe(200);
     expect(decoded.dirtyFlags).toEqual([0, 1]);
     expect(decoded.fieldValues).toEqual([100, 200]);
   });
@@ -506,7 +506,7 @@ describe('Delta State Sync', () => {
   it('no dirty fields produces minimal output', () => {
     const encoded = encodeDeltaStateSync({
       viewId: { scope: 'scene', id: 1 },
-      timestamp: 0,
+      timestampMs: 0,
       fieldValues: [42, 43],
       prevValues: [42, 43],
       fieldWidths: [32, 32],
@@ -662,7 +662,7 @@ describe('Float edge values', () => {
   it('encodes float edge values in state sync without crashing', () => {
     const encoded = encodeStateSync({
       viewId: { scope: 'scene', id: 1 },
-      timestamp: 100,
+      timestampMs: 100,
       fields: [
         { type: 'float', value: NaN },
         { type: 'float', value: Infinity },
@@ -674,7 +674,7 @@ describe('Float edge values', () => {
     // so just verify encoding didn't crash and header is correct
     const decoded = decodeStateSync(encoded.data, encoded.bitLength);
     expect(decoded.viewId).toBe(1);
-    expect(decoded.timestamp).toBe(100);
+    expect(decoded.timestampMs).toBe(100);
     expect(decoded.isFirst).toBe(true);
   });
 });
