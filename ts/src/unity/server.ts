@@ -22,6 +22,7 @@ import { argsToRpcParams, rpcParamsToArgs } from '../services/rpc-schema.js';
 import { encodeStateSync, decodeStateSync, encodeDeltaStateSync } from './state-sync.js';
 import type { StateSyncField, DecodedStateSync } from './state-sync.js';
 import type { ViewId } from './view-id.js';
+import { decodeRpcViewConstant } from './view-id.js';
 
 type EventHandler<T extends unknown[]> = (...args: T) => void;
 
@@ -35,6 +36,10 @@ export interface UnityServerOptions {
   usePeerBatchIndices?: boolean;
   /** Epoch for timestamps (process.hrtime.bigint() nanoseconds). All datagram and ping timestamps are relative to this. */
   epochNs?: bigint;
+  /** Drop incoming RPCs whose allocated targetView doesn't belong to the sender's ViewID block (default true). */
+  enforceViewIdOwnership?: boolean;
+  /** Called when an RPC is received from a client that doesn't own the targetView. */
+  onViewIdViolation?: (session: ClientSession, methodName: string, viewId: ViewId) => void;
 }
 
 export interface StateSyncMessage extends DecodedStateSync {
@@ -58,6 +63,8 @@ export class UnityServer {
   private readonly sendBatchIndices: boolean;
   private readonly usePeerBatchIndices: boolean;
   private readonly epochNs: bigint;
+  private readonly enforceViewIdOwnership: boolean;
+  private readonly onViewIdViolation: ((session: ClientSession, methodName: string, viewId: ViewId) => void) | undefined;
 
   constructor(socket: UdpSocket, options: UnityServerOptions) {
     const rakOpts: { port: number; password?: string; viewIdStride?: number; epochNs?: bigint } = {
@@ -70,6 +77,8 @@ export class UnityServer {
     this.epochNs = options.epochNs ?? process.hrtime.bigint();
     this.sendBatchIndices = options.sendBatchIndices ?? true;
     this.usePeerBatchIndices = options.usePeerBatchIndices ?? true;
+    this.enforceViewIdOwnership = options.enforceViewIdOwnership ?? true;
+    this.onViewIdViolation = options.onViewIdViolation;
 
     this.raknet.onConnect((session) => {
       this.peerIndices.set(session.id, new Map());
@@ -302,6 +311,18 @@ export class UnityServer {
           const pending = queue.shift()!;
           learnMethodIndex(pending, decoded.methodIndex);
           decoded.methodName = pending;
+        }
+      }
+    }
+
+    if (this.enforceViewIdOwnership && decoded.targetView != null && session.viewIdBase < session.viewIdEnd) {
+      const view = decodeRpcViewConstant(decoded.targetView);
+      if (view && view.scope === 'allocated' && view.id > 0) {
+        if (view.id < session.viewIdBase || view.id >= session.viewIdEnd) {
+          if (this.onViewIdViolation) {
+            this.onViewIdViolation(session, decoded.methodName, view);
+          }
+          return;
         }
       }
     }

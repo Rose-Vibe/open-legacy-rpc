@@ -180,7 +180,7 @@ describe('UnityServer', () => {
       params: [{ type: 'int', value: 99 }],
       timestampMs: 0,
       mode: RpcMode.Server,
-      targetView: 0x2000,
+      targetView: 0x2640, // allocated view 50, within player 1's block (50-100)
     });
 
     const f = createFrame(rpc.data, Reliability.RELIABLE_ORDERED);
@@ -191,7 +191,7 @@ describe('UnityServer', () => {
     socket.triggerMessage(buildDataPacket(3, [f]), CLIENT_ADDR);
 
     expect(received).toHaveLength(1);
-    expect(received[0]?.params).toEqual([99]);
+    expect(received[0]?.params).toEqual([99, 0x2640]);
 
     await server.stop();
   });
