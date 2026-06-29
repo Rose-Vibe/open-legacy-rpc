@@ -276,6 +276,8 @@ export interface DecodedRpc {
   methodHash?: string;
   /** Raw 7-bit method index from subsequent-use messages (absent on first-use). */
   methodIndex?: number;
+  /** The 16-bit target view constant from the wire format. */
+  targetView?: number;
 }
 
 /** Decode a Unity RPC message from raw payload bytes. */
@@ -311,6 +313,8 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
       result.methodName = lookupMethodByHash(result.methodHash) ?? 'unknown';
     }
     const hashExtraBits = methodIdBits - 48;
+    bs.pos = 160 + hashExtraBits + 36;
+    result.targetView = bs.readU16BE();
     const modeStart = 160 + hashExtraBits + 52;
     bs.pos = modeStart;
   } else {
@@ -320,6 +324,8 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
     result.methodName =
       INDEX_TO_METHOD.get(methodIndexByte) ??
       `unknown_0x${methodIndexByte.toString(16).padStart(2, '0')}`;
+    bs.pos = 120;
+    result.targetView = bs.readU16BE();
     bs.pos = 136;
   }
 

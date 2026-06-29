@@ -121,6 +121,13 @@ def _extract_udp_payload(data, linktype):
         if proto != 0x0800:
             return None
         ip_data = data[16:]
+    elif linktype == 276:  # LINKTYPE_LINUX_SLL2
+        if len(data) < 20:
+            return None
+        proto = struct.unpack('!H', data[:2])[0]
+        if proto != 0x0800:
+            return None
+        ip_data = data[20:]
     else:
         return None
 

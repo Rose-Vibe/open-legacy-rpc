@@ -308,7 +308,7 @@ export class UnityServer {
 
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
-      handler(session, ...decoded.params);
+      handler(session, ...decoded.params, decoded.targetView);
     }
   }
 
