@@ -688,11 +688,10 @@ subsequent). This check is necessary for correct dispatch.
 
 | Bit Offset | Width | Field |
 |------------|-------|-------|
-| 0–7 | 8 | msg_id = `0x1b` |
-| 8–55 | 48 | NetworkViewID (compressed) |
-| 56–71 | 16 | timestamp (uint16 BE, incrementing ~83ms = ~12 Hz) |
-| 72–79 | 8 | flags: `0x80` on first message, `0x7f` on subsequent |
-| 80–95 | 16 | constant `0x0004` (purpose unknown) |
+| 0–7 | 8 | msg_id = `0x1b` (ID_TIMESTAMP) |
+| 8–71 | 64 | u64 BE `senderRakNetGetTimeMS()` — server uptime in ms. Same field as the RPC header; RakNet's `ShiftIncomingTimestamp` reads bytes 1-8 as u64 for all 0x1b messages. |
+| 72–79 | 8 | flags: `0x80` on first message, `0x7f` on subsequent (distinguishes state sync from RPCs, which use `0x0b`) |
+| 80–95 | 16 | packed NetworkViewID (target view for this state sync stream) |
 
 Data bit count = `bit_length` (from RakNet header) - 96.
 
@@ -898,11 +897,10 @@ Same 96-bit (12-byte) header as unreliable state sync:
 
 | Offset (bits) | Size | Field | Description |
 |---------------|------|-------|-------------|
-| 0 | 8 | msg_id | `0x1b` |
-| 8 | 48 | view_id | NetworkViewID |
-| 56 | 16 | timestamp | uint16 BE |
+| 0 | 8 | msg_id | `0x1b` (ID_TIMESTAMP) |
+| 8 | 64 | timestamp | u64 BE `senderRakNetGetTimeMS()` |
 | 72 | 8 | flags | `0x80` = first, `0x7f` = subsequent |
-| 80 | 16 | constant | `0x0004` |
+| 80 | 16 | view_id | packed NetworkViewID |
 
 ### 8.2 Data: Interleaved Dirty Flags
 
