@@ -326,7 +326,8 @@ class RakNetPeer:
         self._send_seq = 0
         self._recv_seq_max = -1
         self._reliable_send_num = 0
-        self._ordering_index = {}  # channel -> next ordering index
+        self._ordering_index = {}  # channel -> next ordering index (RELIABLE_ORDERED)
+        self._sequencing_index = {}  # channel -> next sequencing index (SEQUENCED types)
         self._connect_time = time.monotonic()
         self._split_assembler = SplitPacketAssembler()
         self._pending_acks = []
@@ -353,10 +354,12 @@ class RakNetPeer:
 
         if msg.is_ordered:
             ch = ordering_channel
-            if ch not in self._ordering_index:
-                self._ordering_index[ch] = 0
-            msg.ordering_index = self._ordering_index[ch]
-            self._ordering_index[ch] += 1
+            is_sequenced = reliability in (Reliability.UNRELIABLE_SEQUENCED, Reliability.RELIABLE_SEQUENCED)
+            counter = self._sequencing_index if is_sequenced else self._ordering_index
+            if ch not in counter:
+                counter[ch] = 0
+            msg.ordering_index = counter[ch]
+            counter[ch] += 1
             msg.ordering_channel = ch
 
         seq = self._send_seq

@@ -205,6 +205,28 @@ def test_parse_known_capture_datagram():
     assert m.payload == bytes.fromhex('8300000001')
 
 
+def test_ordering_index_separate_for_ordered_vs_sequenced():
+    """ORDERED and SEQUENCED use independent index counters on the same channel."""
+    import socket as sock_mod
+    from protocol.raknet_transport import RakNetPeer
+    s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_DGRAM)
+    s.setblocking(False)
+    s.bind(('127.0.0.1', 0))
+    peer = RakNetPeer(s, ('127.0.0.1', 9999))
+
+    # Send interleaved RELIABLE_ORDERED and UNRELIABLE_SEQUENCED on channel 0
+    peer.send_message(b'\x01', Reliability.RELIABLE_ORDERED, ordering_channel=0)
+    peer.send_message(b'\x02', Reliability.UNRELIABLE_SEQUENCED, ordering_channel=0)
+    peer.send_message(b'\x03', Reliability.RELIABLE_ORDERED, ordering_channel=0)
+    peer.send_message(b'\x04', Reliability.UNRELIABLE_SEQUENCED, ordering_channel=0)
+
+    # Ordered counter: 0, 1 (two RELIABLE_ORDERED sends)
+    assert peer._ordering_index[0] == 2
+    # Sequenced counter: 0, 1 (two UNRELIABLE_SEQUENCED sends)
+    assert peer._sequencing_index[0] == 2
+    s.close()
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
