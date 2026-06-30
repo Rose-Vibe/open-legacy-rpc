@@ -113,6 +113,10 @@ export class UnityServer {
     return this.raknet.clients;
   }
 
+  disconnectClient(session: ClientSession): void {
+    this.raknet.disconnectClient(session);
+  }
+
   onConnect(handler: EventHandler<[ClientSession]>): void {
     this.connectHandlers.push(handler);
   }

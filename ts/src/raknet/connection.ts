@@ -289,6 +289,19 @@ export class RakNetServer {
     }
   }
 
+  disconnectClient(session: ClientSession): void {
+    if (session.state !== ConnectionState.CONNECTED) return;
+    session.reliability.queueOutgoing(
+      new Uint8Array([MessageId.DISCONNECTION_NOTIFICATION]),
+      Reliability.RELIABLE_ORDERED,
+    );
+    const packets = session.reliability.getOutgoingPackets();
+    for (const p of packets) {
+      this.socket.sendTo(p, session.address.host, session.address.port);
+    }
+    this.handleDisconnect(session);
+  }
+
   private handleDisconnect(session: ClientSession): void {
     session.state = ConnectionState.DISCONNECTED;
     if (session.playerIndex > 0) {
