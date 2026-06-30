@@ -14,7 +14,7 @@ from .raknet_transport import Reliability
 from .unity_protocol import (
     RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
     decode_rpc, decode_state_sync, encode_state_sync,
-    encode_delta_state_sync,
+    encode_delta_state_sync, decode_rpc_view_constant,
     METHOD_SIGNATURES, is_rpc,
     MSG_ID_BATCH_INDEX, encode_batch_index, decode_batch_index,
     INDEX_TO_METHOD,
@@ -25,7 +25,8 @@ from .bitstream import BitStream
 class UnityServer:
     """Server that speaks Unity's legacy networking protocol."""
 
-    def __init__(self, port=7777, tick_rate=15, viewid_stride=50, password=''):
+    def __init__(self, port=7777, tick_rate=15, viewid_stride=50, password='',
+                 enforce_viewid_ownership=True, on_viewid_violation=None):
         self._raknet = RakNetServer(port=port, viewid_stride=viewid_stride,
                                     password=password)
         self._tick_rate = tick_rate
@@ -46,6 +47,8 @@ class UnityServer:
         self._view_counters = {}  # addr -> next allocation offset
         self._delta_state = {}  # (addr, view_id) -> list of prev field values
         self._view_id_scopes = {}  # view_id -> 'scene' or 'allocated'
+        self._enforce_viewid_ownership = enforce_viewid_ownership
+        self._on_viewid_violation = on_viewid_violation
 
     def start(self):
         self._raknet.start()
@@ -300,10 +303,23 @@ class UnityServer:
                     if resolved:
                         result['method_name'] = resolved
 
+        method = result.get('method_name', '')
+        target_view_raw = result.get('target_view')
+        if self._enforce_viewid_ownership and target_view_raw is not None:
+            view = decode_rpc_view_constant(target_view_raw)
+            if view and view[0] == 'allocated' and view[1] > 0:
+                player_idx = self._raknet.player_indices.get(addr, 0)
+                if player_idx > 0:
+                    block_start = (player_idx * 2 - 1) * self._viewid_stride
+                    block_end = (player_idx * 2) * self._viewid_stride
+                    if view[1] < block_start or view[1] >= block_end:
+                        if self._on_viewid_violation:
+                            self._on_viewid_violation(addr, method, view)
+                        return
+
         view_id = result.get('view_id', 0)
         if not self._is_recv_enabled(addr, view_id):
             return
-        method = result.get('method_name', '')
         handler = self._rpc_handlers.get(method)
         if handler:
             params = result.get('params', [])

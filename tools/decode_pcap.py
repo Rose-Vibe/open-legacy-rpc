@@ -191,7 +191,7 @@ def decode_rpc_layer(payload, bit_length, config):
         'methodName': method_name,
     }
 
-    target_view = _extract_target_view(payload, bit_length, decoded)
+    target_view = decoded.get('target_view')
     if target_view is not None:
         result['targetView'] = target_view
 

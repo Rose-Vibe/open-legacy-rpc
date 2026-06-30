@@ -26,5 +26,8 @@ def validate(test_obj):
     exp_mode = expected.get('rpc_mode')
     if exp_mode is not None and out.get('rpcMode') != exp_mode.name:
         failures.append(f"rpcMode: expected {exp_mode.name}, got {out.get('rpcMode')}")
+    exp_tv = expected.get('target_view')
+    if exp_tv is not None and out.get('targetView') != exp_tv:
+        failures.append(f"targetView: expected {exp_tv}, got {out.get('targetView')}")
 
     return {'pass': len(failures) == 0, 'failures': failures}

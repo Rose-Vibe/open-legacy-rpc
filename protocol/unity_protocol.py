@@ -453,12 +453,16 @@ def decode_rpc(payload, bit_length):
             result['method_name'] = lookup_method_by_hash(method_hash.hex()) or 'unknown'
 
         hash_extra_bits = method_id_bits - 48
+        bs.pos = 160 + hash_extra_bits + 36
+        result['target_view'] = bs.read_u16_be()
         mode_start = 160 + hash_extra_bits + 52
         bs.pos = mode_start
     else:
         bs.pos = 80
         method_idx = bs.read_bits(8) & 0xFE
         result['method_name'] = INDEX_TO_METHOD.get(method_idx, f'unknown_0x{method_idx:02x}')
+        bs.pos = 120
+        result['target_view'] = bs.read_u16_be()
         bs.pos = 136
 
     mode_val = bs.read_bits(4)

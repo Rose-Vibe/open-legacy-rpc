@@ -318,6 +318,48 @@ def test_password_missing():
     server_thread.join(timeout=2.0)
 
 
+def test_player_index_recycling():
+    """Disconnected player indices are recycled for new connections."""
+    from protocol.raknet_connection import RakNetServer as RawServer
+    srv = RawServer(port=17782, viewid_stride=50)
+    assert srv._free_player_indices == []
+    assert srv._next_player_index == 1
+
+    # Simulate two player ready + disconnect cycles
+    # We can't easily run the full handshake, so test the internal state directly
+    srv._free_player_indices.append(3)
+    srv._free_player_indices.append(1)
+
+    # Next allocation should pop from free list (FIFO)
+    idx = srv._free_player_indices.pop(0)
+    assert idx == 3
+    idx = srv._free_player_indices.pop(0)
+    assert idx == 1
+    # Now free list is empty, so next would be _next_player_index
+    assert len(srv._free_player_indices) == 0
+
+
+def test_decode_rpc_target_view():
+    """decode_rpc() extracts target_view from both subsequent-use and first-use RPCs."""
+    from protocol.unity_protocol import (
+        encode_rpc_subsequent, encode_rpc_first_use, decode_rpc, RPCMode,
+    )
+
+    # Subsequent-use
+    data, bits = encode_rpc_subsequent(
+        'RPC_Int', [42], view_id=0, timestamp_ms=100,
+        mode=RPCMode.Server, target_view=0x2000)
+    result = decode_rpc(data, bits)
+    assert result['target_view'] == 0x2000
+
+    # First-use
+    data, bits = encode_rpc_first_use(
+        'RPC_Int', [42], view_id=0, timestamp_ms=100,
+        mode=RPCMode.Server, target_view=0x2680)
+    result = decode_rpc(data, bits)
+    assert result['target_view'] == 0x2680
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]

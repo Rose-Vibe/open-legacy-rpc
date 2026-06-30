@@ -252,6 +252,7 @@ class RakNetServer:
         self.peers = {}  # addr -> RakNetPeer
         self.player_indices = {}  # addr -> player_index
         self._next_player_index = 1
+        self._free_player_indices = []
         self._message_handlers = {}
         self._connect_handler = None
         self._disconnect_handler = None
@@ -420,8 +421,11 @@ class RakNetServer:
         peer.send_message(bytes(buf), Reliability.RELIABLE_ORDERED)
 
     def _handle_player_ready(self, addr, payload):
-        player_idx = self._next_player_index
-        self._next_player_index += 1
+        if self._free_player_indices:
+            player_idx = self._free_player_indices.pop(0)
+        else:
+            player_idx = self._next_player_index
+            self._next_player_index += 1
         self.player_indices[addr] = player_idx
 
         # 0x81 format (from multi-client captures):
@@ -446,6 +450,8 @@ class RakNetServer:
 
     def _handle_disconnect(self, addr):
         player_idx = self.player_indices.pop(addr, None)
+        if player_idx is not None and player_idx > 0:
+            self._free_player_indices.append(player_idx)
         self.peers.pop(addr, None)
         if self._disconnect_handler:
             self._disconnect_handler(addr, player_idx)

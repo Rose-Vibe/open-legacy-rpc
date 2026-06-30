@@ -241,11 +241,14 @@ def process_rpcEncode(inp):
 
 def process_rpcDecode(inp):
     d = decode_rpc(bytes.fromhex(inp['dataHex']), inp['bitLength'])
-    return {
+    result = {
         'methodName': d.get('method_name', ''),
         'timestampMs': d.get('timestamp_ms', 0),
         'rpcMode': d['rpc_mode'].name if 'rpc_mode' in d else '',
     }
+    if 'target_view' in d:
+        result['targetView'] = d['target_view']
+    return result
 
 
 def process_rpcFirstUse(inp):
@@ -260,10 +263,13 @@ def process_rpcFirstUse(inp):
 
 def process_rpcFirstUseDecode(inp):
     d = decode_rpc(bytes.fromhex(inp['dataHex']), inp['bitLength'])
-    return {
+    result = {
         'methodName': d.get('method_name', ''),
         'rpcMode': d['rpc_mode'].name if 'rpc_mode' in d else '',
     }
+    if 'target_view' in d:
+        result['targetView'] = d['target_view']
+    return result
 
 
 def process_methodHash(inp):

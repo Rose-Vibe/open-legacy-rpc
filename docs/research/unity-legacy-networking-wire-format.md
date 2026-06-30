@@ -882,6 +882,17 @@ The server:
 2. Tracks which ViewIDs each player has allocated.
 3. Frees all allocated ViewIDs on player disconnect (equivalent to
    `Network.RemoveRPCs()` / `DestroyPlayerObjects()`).
+4. **Enforces ViewID ownership** on incoming RPCs: if an RPC's
+   `targetView` (§3.6) decodes to an allocated ViewID outside the
+   sender's block, the server drops the RPC silently. This prevents
+   re-broadcast loops when clients relay events via `Broadcast()`.
+5. **Recycles player indices** on disconnect: disconnected player
+   indices go into a free list. New connections draw from the free
+   list first, falling back to `nextPlayerIndex++` when empty. This
+   keeps ViewID block assignments stable across reconnects — clients
+   that allocate car ViewIDs on first connect and reuse them on
+   reconnect would otherwise get a different block and fail the
+   ownership check.
 
 ---
 

@@ -303,6 +303,7 @@ handlers.set('rpcDecode', (inp) => {
     methodName: d.methodName,
     timestampMs: d.timestampMs,
     rpcMode: d.rpcMode,
+    targetView: d.targetView,
   };
 });
 
@@ -324,6 +325,7 @@ handlers.set('rpcFirstUseDecode', (inp) => {
   return {
     methodName: d.methodName,
     rpcMode: d.rpcMode,
+    targetView: d.targetView,
   };
 });
 
