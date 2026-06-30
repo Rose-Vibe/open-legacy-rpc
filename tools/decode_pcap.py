@@ -226,22 +226,6 @@ def decode_rpc_layer(payload, bit_length, config):
     return result
 
 
-def _extract_target_view(payload, bit_length, decoded):
-    """Extract the 16-bit target view constant from the raw RPC payload."""
-    from protocol.bitstream import BitStream
-    try:
-        bs = BitStream(payload, bit_length)
-        if decoded.get('first_use'):
-            hash_hex = decoded.get('method_hash', '')
-            hash_extra_bits = len(hash_hex) * 4
-            const_start = 160 + hash_extra_bits + 36
-        else:
-            const_start = 120
-        bs.pos = const_start
-        return bs.read_u16_be()
-    except Exception:
-        return None
-
 
 def _partial_rpc(payload, bit_length):
     """Best-effort RPC decode when decode_rpc() throws."""
