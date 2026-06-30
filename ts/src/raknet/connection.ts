@@ -54,6 +54,7 @@ export class RakNetServer {
   private socket: UdpSocket;
   private sessions: Map<string, ClientSession> = new Map();
   private nextPlayerIndex = 1;
+  private freePlayerIndices: number[] = [];
   private readonly password: string;
   private readonly viewIdStride: number;
   private readonly port: number;
@@ -261,7 +262,9 @@ export class RakNetServer {
   }
 
   private handlePlayerReady(session: ClientSession): void {
-    const playerIdx = this.nextPlayerIndex++;
+    const playerIdx = this.freePlayerIndices.length > 0
+      ? this.freePlayerIndices.shift()!
+      : this.nextPlayerIndex++;
     session.playerIndex = playerIdx;
 
     const blockStart = playerIdx * 2 - 1;
@@ -288,6 +291,9 @@ export class RakNetServer {
 
   private handleDisconnect(session: ClientSession): void {
     session.state = ConnectionState.DISCONNECTED;
+    if (session.playerIndex > 0) {
+      this.freePlayerIndices.push(session.playerIndex);
+    }
     this.sessions.delete(session.id);
     for (const h of this.disconnectHandlers) {
       h(session);
