@@ -116,10 +116,54 @@ describe('RakNetServer', () => {
     serverSocket.triggerMessage(req, CLIENT);
 
     expect(server.clients.size).toBe(1);
-    const session = server.getSession('10.0.0.1:5000');
+    const session = [...server.clients.values()][0];
     expect(session).toBeDefined();
     expect(session!.state).toBe(ConnectionState.CONNECTING);
+    // The public id is an opaque per-session GUID, never the address
+    expect(session!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(session!.id).not.toBe('10.0.0.1:5000');
+    expect(server.getSession(session!.id)).toBe(session);
     await server.stop();
+  });
+
+  it('retransmitted open connection request reuses the session (same id)', async () => {
+    await server.start();
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    serverSocket.triggerMessage(req, CLIENT);
+    const firstId = [...server.clients.values()][0]!.id;
+    serverSocket.triggerMessage(req, CLIENT);
+    expect(server.clients.size).toBe(1);
+    expect([...server.clients.values()][0]!.id).toBe(firstId);
+    await server.stop();
+  });
+
+  it('disconnect removes the session from both routing and identity maps', async () => {
+    await server.start();
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    serverSocket.triggerMessage(req, CLIENT);
+    const session = [...server.clients.values()][0]!;
+    session.state = ConnectionState.CONNECTED; // disconnectClient only acts on connected sessions
+    server.disconnectClient(session);
+    expect(server.getSession(session.id)).toBeUndefined();
+    expect(server.clients.size).toBe(0);
+    // A fresh connection from the same address is a NEW session/id
+    serverSocket.triggerMessage(req, CLIENT);
+    expect(server.clients.size).toBe(1);
+    expect([...server.clients.values()][0]!.id).not.toBe(session.id);
+    await server.stop();
+  });
+
+  it('stop() drains both maps', async () => {
+    await server.start();
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    serverSocket.triggerMessage(req, CLIENT);
+    const session = [...server.clients.values()][0]!;
+    await server.stop();
+    expect(server.clients.size).toBe(0);
+    expect(server.getSession(session.id)).toBeUndefined();
   });
 
   it('rejects wrong password', async () => {

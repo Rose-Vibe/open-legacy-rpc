@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo, IncomingMessage } from './types.js';
 import { Reliability, OFFLINE_MAGIC, MTU_SIZE, MessageId } from './types.js';
 import { ReliabilityLayer } from './reliability.js';
@@ -30,6 +31,11 @@ function readU32BE(buf: Uint8Array, offset: number): number {
   );
 }
 
+/** Key for the internal datagram routing table. Never exposed as an identity. */
+function addrKey(remote: AddressInfo): string {
+  return `${remote.host}:${String(remote.port)}`;
+}
+
 function randomGuid(): Uint8Array {
   const buf = new Uint8Array(8);
   for (let i = 0; i < 8; i++) {
@@ -39,6 +45,11 @@ function randomGuid(): Uint8Array {
 }
 
 export interface ClientSession {
+  /**
+   * Opaque per-connection GUID — NOT derived from the client's address,
+   * so it is safe to expose publicly (web UIs, logs). A reconnect is a
+   * new session with a new id. Use `session.address` for the endpoint.
+   */
   readonly id: string;
   readonly address: AddressInfo;
   playerIndex: number;
@@ -54,7 +65,10 @@ type EventHandler<T extends unknown[]> = (...args: T) => void;
 
 export class RakNetServer {
   private socket: UdpSocket;
-  private sessions: Map<string, ClientSession> = new Map();
+  /** Datagram routing table, keyed by addrKey(remote). Internal only. */
+  private sessionsByAddr: Map<string, ClientSession> = new Map();
+  /** Public identity map, keyed by ClientSession.id (GUID). */
+  private sessionsById: Map<string, ClientSession> = new Map();
   private nextPlayerIndex = 1;
   private freePlayerIndices: number[] = [];
   private readonly password: string;
@@ -93,7 +107,7 @@ export class RakNetServer {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
-    for (const session of this.sessions.values()) {
+    for (const session of this.sessionsByAddr.values()) {
       if (session.state === ConnectionState.CONNECTED) {
         session.reliability.queueOutgoing(
           new Uint8Array([MessageId.DISCONNECTION_NOTIFICATION]),
@@ -105,7 +119,8 @@ export class RakNetServer {
         }
       }
     }
-    this.sessions.clear();
+    this.sessionsByAddr.clear();
+    this.sessionsById.clear();
     await this.socket.close();
   }
 
@@ -126,18 +141,18 @@ export class RakNetServer {
   }
 
   getSession(id: string): ClientSession | undefined {
-    return this.sessions.get(id);
+    return this.sessionsById.get(id);
   }
 
   get clients(): ReadonlyMap<string, ClientSession> {
-    return this.sessions;
+    return this.sessionsById;
   }
 
   private pingCounter = 0;
 
   private tick(): void {
     this.pingCounter++;
-    for (const session of this.sessions.values()) {
+    for (const session of this.sessionsByAddr.values()) {
       if (session.state === ConnectionState.CONNECTED && this.pingCounter % 15 === 0) {
         const ping = new Uint8Array(9);
         ping[0] = 0x00;
@@ -157,14 +172,14 @@ export class RakNetServer {
 
   private handlePacket(data: Uint8Array, remote: AddressInfo): void {
     const first = data[0] ?? 0;
-    const sessionId = `${remote.host}:${String(remote.port)}`;
+    const routeKey = addrKey(remote);
 
     if (first === 0x09) {
-      this.handleOpenConnectionRequest(remote, data, sessionId);
+      this.handleOpenConnectionRequest(remote, data, routeKey);
       return;
     }
 
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionsByAddr.get(routeKey);
     if (!session) return;
 
     const messages = session.reliability.processIncoming(data);
@@ -209,7 +224,7 @@ export class RakNetServer {
   private handleOpenConnectionRequest(
     remote: AddressInfo,
     data: Uint8Array,
-    sessionId: string,
+    routeKey: string,
   ): void {
     const clientGuidUpper = data.slice(2, 6);
     const launchId = data.length >= 10
@@ -225,9 +240,11 @@ export class RakNetServer {
     reply.set(encodeAddress(remote.host, remote.port), 25);
     this.socket.sendTo(reply, remote.host, remote.port);
 
-    if (!this.sessions.has(sessionId)) {
-      this.sessions.set(sessionId, {
-        id: sessionId,
+    // Retransmitted open-connection requests from a known address reuse
+    // the existing session (same id); only a new address mints a session.
+    if (!this.sessionsByAddr.has(routeKey)) {
+      const session: ClientSession = {
+        id: randomUUID(),
         address: remote,
         playerIndex: 0,
         viewIdBase: 0,
@@ -235,8 +252,16 @@ export class RakNetServer {
         state: ConnectionState.CONNECTING,
         reliability: new ReliabilityLayer(remote, this.epochNs),
         perGameLaunchId: launchId,
-      });
+      };
+      this.sessionsByAddr.set(routeKey, session);
+      this.sessionsById.set(session.id, session);
     }
+  }
+
+  /** Remove a session from BOTH maps (routing + identity). */
+  private removeSession(session: ClientSession): void {
+    this.sessionsByAddr.delete(addrKey(session.address));
+    this.sessionsById.delete(session.id);
   }
 
   private handleConnectionRequest(session: ClientSession, payload: Uint8Array): void {
@@ -250,7 +275,7 @@ export class RakNetServer {
         clientPw += String.fromCharCode(b);
       }
       if (clientPw !== this.password) {
-        this.sessions.delete(session.id);
+        this.removeSession(session);
         return;
       }
     }
@@ -313,7 +338,7 @@ export class RakNetServer {
     if (session.playerIndex > 0) {
       this.freePlayerIndices.push(session.playerIndex);
     }
-    this.sessions.delete(session.id);
+    this.removeSession(session);
     for (const h of this.disconnectHandlers) {
       h(session);
     }
