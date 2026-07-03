@@ -339,6 +339,35 @@ def test_player_index_recycling():
     assert len(srv._free_player_indices) == 0
 
 
+def test_peer_launch_id():
+    """Server exposes per-game-launch ID from connecting client."""
+    server = UnityServer(port=17783)
+    server.start()
+
+    launch_ids = []
+    server.on_connect(lambda addr, idx: launch_ids.append(server.get_peer_launch_id(addr)))
+    server.on_disconnect(lambda addr, idx: None)
+
+    server_thread = threading.Thread(target=server.run, args=(3.0,), daemon=True)
+    server_thread.start()
+    time.sleep(0.1)
+
+    client = UnityClient()
+    try:
+        client.connect('127.0.0.1', 17783, timeout=2.0)
+        assert client.connected
+        time.sleep(0.2)
+        assert len(launch_ids) == 1
+        lid = launch_ids[0]
+        assert lid is not None
+        assert isinstance(lid, int)
+        assert lid > 0
+        client.disconnect()
+    finally:
+        server.stop()
+        server_thread.join(timeout=2.0)
+
+
 def test_decode_rpc_target_view():
     """decode_rpc() extracts target_view from both subsequent-use and first-use RPCs."""
     from protocol.unity_protocol import (

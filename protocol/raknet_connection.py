@@ -251,6 +251,7 @@ class RakNetServer:
         self.sock = None
         self.peers = {}  # addr -> RakNetPeer
         self.player_indices = {}  # addr -> player_index
+        self.peer_launch_ids = {}  # addr -> int (8-byte GUID from client, random per game launch)
         self._next_player_index = 1
         self._free_player_indices = []
         self._message_handlers = {}
@@ -377,7 +378,8 @@ class RakNetServer:
             return
 
         # Parse: msg_id(1) + version(1) + guid(8) + OFFLINE_MAGIC(16) + server_addr(6)
-        # Extract client guid for cookie echo
+        if len(data) >= 10:
+            self.peer_launch_ids[addr] = struct.unpack('>Q', data[2:10])[0]
         client_guid_upper = data[2:6] if len(data) >= 6 else b'\x00\x00\x00\x00'
 
         buf = bytearray(MTU_SIZE)
@@ -452,6 +454,7 @@ class RakNetServer:
         player_idx = self.player_indices.pop(addr, None)
         if player_idx is not None and player_idx > 0:
             self._free_player_indices.append(player_idx)
+        self.peer_launch_ids.pop(addr, None)
         self.peers.pop(addr, None)
         if self._disconnect_handler:
             self._disconnect_handler(addr, player_idx)
