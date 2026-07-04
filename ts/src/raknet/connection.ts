@@ -101,12 +101,12 @@ export class RakNetServer {
 
   constructor(
     socketOrOptions: UdpSocket | RakNetServerOptions,
-    options?: RakNetServerOptions & { port: number },
+    options?: RakNetServerOptions,
   ) {
     if (options !== undefined) {
       // Legacy form: new RakNetServer(socket, { port, ... })
       this.externalSocket = socketOrOptions as UdpSocket;
-      this.initialPorts = [options.port];
+      this.initialPorts = options.ports ?? (options.port !== undefined ? [options.port] : []);
       this.password = options.password ?? '';
       this.passwordPredicate = options.passwordPredicate ?? null;
       this.viewIdStride = options.viewIdStride ?? 50;
@@ -123,13 +123,18 @@ export class RakNetServer {
 
   async start(): Promise<void> {
     if (this.externalSocket) {
-      const port = this.initialPorts[0] ?? 0;
-      this.sockets.set(port, this.externalSocket);
-      this.portAccepting.set(port, true);
-      this.externalSocket.onMessage((data, remote) => {
-        this.handlePacket(data, remote, this.externalSocket!);
-      });
-      await this.externalSocket.bind(port);
+      if (this.initialPorts.length > 0) {
+        const port = this.initialPorts[0]!;
+        this.sockets.set(port, this.externalSocket);
+        this.portAccepting.set(port, true);
+        this.externalSocket.onMessage((data, remote) => {
+          this.handlePacket(data, remote, this.externalSocket!);
+        });
+        await this.externalSocket.bind(port);
+      }
+      for (let i = 1; i < this.initialPorts.length; i++) {
+        await this.addPort(this.initialPorts[i]!);
+      }
     } else {
       for (const port of this.initialPorts) {
         await this.addPort(port);

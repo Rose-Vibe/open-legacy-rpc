@@ -1,5 +1,6 @@
 import type { ClientSession } from '../raknet/connection.js';
 import { RakNetServer } from '../raknet/connection.js';
+import type { PortRemoveMode } from '../raknet/connection.js';
 import { Reliability } from '../raknet/types.js';
 import type { IncomingMessage } from '../raknet/types.js';
 import type { UdpSocket } from '../raknet/socket.js';
@@ -27,8 +28,10 @@ import { decodeRpcViewConstant } from './view-id.js';
 type EventHandler<T extends unknown[]> = (...args: T) => void;
 
 export interface UnityServerOptions {
-  port: number;
+  port?: number;
+  ports?: number[];
   password?: string;
+  passwordPredicate?: (session: ClientSession, password: string) => boolean;
   viewIdStride?: number;
   /** Send BATCH index responses when we receive first-use RPCs (default true). */
   sendBatchIndices?: boolean;
@@ -67,10 +70,18 @@ export class UnityServer {
   private readonly onViewIdViolation: ((session: ClientSession, methodName: string, viewId: ViewId) => void) | undefined;
 
   constructor(socket: UdpSocket, options: UnityServerOptions) {
-    const rakOpts: { port: number; password?: string; viewIdStride?: number; epochNs?: bigint } = {
-      port: options.port,
-    };
+    const rakOpts: {
+      port?: number;
+      ports?: number[];
+      password?: string;
+      passwordPredicate?: (session: ClientSession, password: string) => boolean;
+      viewIdStride?: number;
+      epochNs?: bigint;
+    } = {};
+    if (options.port !== undefined) rakOpts.port = options.port;
+    if (options.ports !== undefined) rakOpts.ports = options.ports;
     if (options.password !== undefined) rakOpts.password = options.password;
+    if (options.passwordPredicate !== undefined) rakOpts.passwordPredicate = options.passwordPredicate;
     if (options.viewIdStride !== undefined) rakOpts.viewIdStride = options.viewIdStride;
     if (options.epochNs !== undefined) rakOpts.epochNs = options.epochNs;
     this.raknet = new RakNetServer(socket, rakOpts);
@@ -333,7 +344,11 @@ export class UnityServer {
 
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
-      handler(session, ...decoded.params, decoded.targetView);
+      try {
+        handler(session, ...decoded.params, decoded.targetView);
+      } catch (err) {
+        console.error(`[UnityServer] RPC handler error for ${decoded.methodName}:`, err); // eslint-disable-line no-console
+      }
     }
   }
 
@@ -361,6 +376,30 @@ export class UnityServer {
       payload: msg.payload,
       bitLength: msg.bitLength,
     };
-    for (const h of this.stateSyncHandlers) h(session, syncMsg);
+    for (const h of this.stateSyncHandlers) {
+      try {
+        h(session, syncMsg);
+      } catch (err) {
+        console.error('[UnityServer] StateSync handler error:', err); // eslint-disable-line no-console
+      }
+    }
+  }
+
+  // ─── Multi-port passthrough ────────────────────────────────
+
+  async addPort(port: number): Promise<void> {
+    await this.raknet.addPort(port);
+  }
+
+  async removePort(port: number, options: { mode: PortRemoveMode }): Promise<void> {
+    await this.raknet.removePort(port, options);
+  }
+
+  setPortAccepting(port: number, accepting: boolean): void {
+    this.raknet.setPortAccepting(port, accepting);
+  }
+
+  getSessionsByPort(port: number): ClientSession[] {
+    return this.raknet.getSessionsByPort(port);
   }
 }
