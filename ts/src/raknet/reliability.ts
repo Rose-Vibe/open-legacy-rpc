@@ -181,6 +181,10 @@ export class ReliabilityLayer {
 
   private handleAck(ranges: Array<[number, number]>): void {
     for (const [min, max] of ranges) {
+      if (max - min > 10_000) {
+        console.warn(`RakNet decode: ACK range span exceeds cap (${max - min} > 10000), skipping`);
+        continue;
+      }
       for (let seq = min; seq <= max; seq++) {
         this.unackedReliable.delete(seq);
       }
@@ -228,6 +232,15 @@ export class ReliabilityLayer {
     const id = frame.splitPacketId ?? 0;
     const idx = frame.splitPacketIndex ?? 0;
     const count = frame.splitPacketCount ?? 0;
+
+    if (count > 128) {
+      console.warn(`RakNet decode: splitPacketCount exceeds cap (${count} > 128), dropping`);
+      return null;
+    }
+    if (idx >= count) {
+      console.warn(`RakNet decode: splitPacketIndex >= splitPacketCount (${idx} >= ${count}), dropping`);
+      return null;
+    }
 
     let state = this.splitAssembler.get(id);
     if (!state) {

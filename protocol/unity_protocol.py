@@ -1,11 +1,14 @@
 """
 Unity legacy networking protocol layer — RPC and state sync encoding/decoding.
 """
+import logging
 import struct
 from enum import IntEnum
 
 from .bitstream import BitStream
 from .huffman import get_tree, get_codes, decode_string, encode_string_for_wire
+
+log = logging.getLogger(__name__)
 
 
 class RPCMode(IntEnum):
@@ -428,6 +431,8 @@ def encode_rpc_first_use(method_name, params, view_id=1, timestamp_ms=0,
 
 def decode_rpc(payload, bit_length):
     """Decode a Unity RPC message. Returns a dict with decoded fields."""
+    if bit_length < 88:
+        raise ValueError(f"RakNet decode: RPC bitLength too short ({bit_length} < 88)")
     bs = BitStream(payload, bit_length)
     result = {}
 
@@ -552,6 +557,9 @@ def _decode_string_param(bs):
     bit_length = bs.read_compressed_u32()
     if bit_length == 0:
         return ''
+    if bit_length > bs.remaining:
+        log.warning("RakNet decode: string param bitLength exceeds remaining (%d > %d), clamping", bit_length, bs.remaining)
+        bit_length = bs.remaining
     huffman_bits = bs.read_bits_as_str(bit_length)
     tree = get_tree()
     decoded = decode_string(huffman_bits, tree)
@@ -604,6 +612,9 @@ def decode_batch_index(payload):
     method_id_bits = half_bits * 2
     hash_bytes = method_id_bits // 8 - 6
     if hash_bytes < 0:
+        return None
+    if hash_bytes > 64:
+        log.warning("RakNet decode: batchIndex hashBytes exceeds cap (%d > 64), rejecting", hash_bytes)
         return None
 
     bs.read_bit()  # flag (always 0)

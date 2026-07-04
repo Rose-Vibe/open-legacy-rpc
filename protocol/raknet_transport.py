@@ -149,6 +149,8 @@ def unpack_encapsulated(data):
 
         end = pos + byte_length
         if end > len(data):
+            log.warning("RakNet decode: frame bitLength exceeds payload (%d bits > %d available), clamping",
+                        msg.bit_length, (len(data) - pos) * 8)
             msg.payload = bytes(data[pos:])
             msg.bit_length = (len(data) - pos) * 8
         else:
@@ -279,6 +281,15 @@ class SplitPacketAssembler:
     def add(self, msg):
         """Add a split fragment. Returns the reassembled EncapsulatedMessage
         if all fragments have arrived, else None."""
+        if msg.split_packet_count is not None and msg.split_packet_count > 128:
+            log.warning("RakNet decode: splitPacketCount exceeds cap (%d > 128), dropping", msg.split_packet_count)
+            return None
+        if (msg.split_packet_count is not None and msg.split_packet_index is not None
+                and msg.split_packet_index >= msg.split_packet_count):
+            log.warning("RakNet decode: splitPacketIndex >= splitPacketCount (%d >= %d), dropping",
+                        msg.split_packet_index, msg.split_packet_count)
+            return None
+
         now = time.monotonic()
         self._prune(now)
 
@@ -417,6 +428,9 @@ class RakNetPeer:
 
     def _handle_ack(self, ranges):
         for min_val, max_val in ranges:
+            if max_val - min_val > 10_000:
+                log.warning("RakNet decode: ACK range span exceeds cap (%d > 10000), skipping", max_val - min_val)
+                continue
             for seq in range(min_val, max_val + 1):
                 self._unacked_reliable.pop(seq, None)
 

@@ -7,6 +7,10 @@ export const STRING = 1;
 export const BINARY = 2;
 export const POINTER = 3;
 
+const MAX_COLUMNS = 1000;
+const MAX_ROWS = 100_000;
+const MAX_BINARY_CELL_BYTES = 16 * 1024 * 1024;
+
 // Message IDs
 export const ID_DATABASE_QUERY_REQUEST = 75;
 export const ID_DATABASE_UPDATE_ROW = 76;
@@ -90,8 +94,12 @@ export interface QueryReplyMessage {
 const tree = getTree();
 
 function readHuffmanString(bs: BitStream): string {
-  const bitLength = bs.readCompressedU32();
+  let bitLength = bs.readCompressedU32();
   if (bitLength === 0) return '';
+  if (bitLength > bs.remaining) {
+    console.warn(`RakNet decode: Huffman bitLength exceeds remaining (${bitLength} > ${bs.remaining}), clamping`);
+    bitLength = bs.remaining;
+  }
   const endPos = bs.pos + bitLength;
   const chars: string[] = [];
   let node = tree;
@@ -129,6 +137,9 @@ function readCell(bs: BitStream, colType: number): number | string | Uint8Array 
   if (colType === STRING) return readHuffmanString(bs);
   if (colType === BINARY) {
     const length = bs.readU32BE();
+    if (length > MAX_BINARY_CELL_BYTES) {
+      throw new Error(`RakNet decode: BINARY cell length exceeds cap (${length} > ${MAX_BINARY_CELL_BYTES})`);
+    }
     return bs.readAlignedBytes(length);
   }
   if (colType === POINTER) {
@@ -337,6 +348,9 @@ export function decodeQueryReply(payload: Uint8Array): QueryReplyMessage {
   if (bs.remaining < 32) return { columns: [], rows: [] };
 
   const numColumns = bs.readU32BE();
+  if (numColumns > MAX_COLUMNS) {
+    throw new Error(`RakNet decode: numColumns exceeds cap (${numColumns} > ${MAX_COLUMNS})`);
+  }
   const columns: Column[] = [];
   for (let i = 0; i < numColumns; i++) {
     const name = readHuffmanString(bs);
@@ -345,10 +359,16 @@ export function decodeQueryReply(payload: Uint8Array): QueryReplyMessage {
   }
 
   const numRows = bs.readU32BE();
+  if (numRows > MAX_ROWS) {
+    throw new Error(`RakNet decode: numRows exceeds cap (${numRows} > ${MAX_ROWS})`);
+  }
   const rows: Row[] = [];
   for (let i = 0; i < numRows; i++) {
     const key = bs.readU32BE();
     const numEntries = bs.readU32BE();
+    if (numEntries > numColumns) {
+      throw new Error(`RakNet decode: numEntries exceeds numColumns (${numEntries} > ${numColumns})`);
+    }
     const cells: Record<string, number | string | Uint8Array | null> = {};
     for (let j = 0; j < numEntries; j++) {
       const cellIdx = bs.readU32BE();

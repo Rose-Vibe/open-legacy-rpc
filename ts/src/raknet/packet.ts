@@ -127,11 +127,16 @@ function parseFrames(data: Uint8Array, offset: number): Frame[] {
 
     const end = pos + byteLength;
     const payload = data.slice(pos, Math.min(end, data.length));
+    let actualBitLength = bitLength;
+    if (payload.length < byteLength) {
+      console.warn(`RakNet decode: frame bitLength exceeds payload (${bitLength} bits > ${payload.length * 8} available), clamping`);
+      actualBitLength = payload.length * 8;
+    }
     pos = end;
 
     frames.push({
       reliability,
-      bitLength,
+      bitLength: actualBitLength,
       reliableMsgNumber,
       orderingIndex,
       orderingChannel,

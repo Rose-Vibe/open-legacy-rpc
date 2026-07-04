@@ -5,9 +5,12 @@ Handles RakNet LightweightDatabase message encoding/decoding using
 BitStream and Huffman StringCompressor.
 """
 
+import logging
 import struct
 from .bitstream import BitStream
 from .huffman import get_tree, encode_string_for_wire
+
+log = logging.getLogger(__name__)
 
 _tree = get_tree()
 
@@ -43,6 +46,10 @@ QF_LESS_THAN_EQ = 5
 QF_IS_EMPTY = 6
 QF_NOT_EMPTY = 7
 
+MAX_COLUMNS = 1000
+MAX_ROWS = 100_000
+MAX_BINARY_CELL_BYTES = 16 * 1024 * 1024
+
 VERSION = bytes([2, 0, 0])
 
 
@@ -50,6 +57,9 @@ def read_huffman_string(bs):
     bit_length = bs.read_compressed_u32()
     if bit_length == 0:
         return ""
+    if bit_length > bs.remaining:
+        log.warning("RakNet decode: Huffman bitLength exceeds remaining (%d > %d), clamping", bit_length, bs.remaining)
+        bit_length = bs.remaining
     end_pos = bs.pos + bit_length
     chars = []
     node = _tree
@@ -85,6 +95,8 @@ def read_cell(bs, col_type):
         return read_huffman_string(bs)
     elif col_type == BINARY:
         length = bs.read_u32_be()
+        if length > MAX_BINARY_CELL_BYTES:
+            raise ValueError(f"RakNet decode: BINARY cell length exceeds cap ({length} > {MAX_BINARY_CELL_BYTES})")
         return bs.read_aligned_bytes(length)
     elif col_type == POINTER:
         return bs.read_bits(64)
@@ -278,6 +290,8 @@ def decode_query_reply(payload):
         return {'columns': [], 'rows': []}
 
     num_columns = bs.read_u32_be()
+    if num_columns > MAX_COLUMNS:
+        raise ValueError(f"RakNet decode: numColumns exceeds cap ({num_columns} > {MAX_COLUMNS})")
     columns = []
     for _ in range(num_columns):
         name = read_huffman_string(bs)
@@ -285,10 +299,14 @@ def decode_query_reply(payload):
         columns.append({'name': name, 'type': col_type})
 
     num_rows = bs.read_u32_be()
+    if num_rows > MAX_ROWS:
+        raise ValueError(f"RakNet decode: numRows exceeds cap ({num_rows} > {MAX_ROWS})")
     rows = []
     for _ in range(num_rows):
         key = bs.read_u32_be()
         num_entries = bs.read_u32_be()
+        if num_entries > num_columns:
+            raise ValueError(f"RakNet decode: numEntries exceeds numColumns ({num_entries} > {num_columns})")
         cells = {}
         for _ in range(num_entries):
             cell_idx = bs.read_u32_be()

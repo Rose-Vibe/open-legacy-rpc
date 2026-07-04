@@ -1,4 +1,4 @@
-import { BitStream } from '../bitstream.js';
+import { BitStream, BitStreamError } from '../bitstream.js';
 import { encodeStringForWire, decodeString } from '../huffman.js';
 import { rpcViewConstantFromVid } from './view-id.js';
 import type { ViewId } from './view-id.js';
@@ -282,6 +282,9 @@ export interface DecodedRpc {
 
 /** Decode a Unity RPC message from raw payload bytes. */
 export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
+  if (bitLength < 88) {
+    throw new BitStreamError(`RPC payload too short (${bitLength} < 88 bits minimum)`);
+  }
   const bs = new BitStream(payload, bitLength);
 
   bs.readU8(); // msg_id
@@ -379,8 +382,12 @@ function decodeParams(bs: BitStream, sig: ParamType[]): unknown[] {
 }
 
 function decodeStringParam(bs: BitStream): string {
-  const bitCount = bs.readCompressedU32();
+  let bitCount = bs.readCompressedU32();
   if (bitCount === 0) return '';
+  if (bitCount > bs.remaining) {
+    console.warn(`RakNet decode: string param bitCount exceeds remaining (${bitCount} > ${bs.remaining}), clamping`);
+    bitCount = bs.remaining;
+  }
   let bits = '';
   for (let i = 0; i < bitCount; i++) {
     bits += bs.readBit() === 1 ? '1' : '0';
@@ -492,6 +499,10 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
   const methodIdBits = halfBits * 2;
   const hashBytes = methodIdBits / 8 - 6;
   if (hashBytes < 0) return null;
+  if (hashBytes > 64) {
+    console.warn(`RakNet decode: batchIndex hashBytes exceeds cap (${hashBytes} > 64), rejecting`);
+    return null;
+  }
 
   bs.readBit(); // flag (always 0)
   bs.readBytes(6); // classGuid (skip)
