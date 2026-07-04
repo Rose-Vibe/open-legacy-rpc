@@ -3,10 +3,12 @@ import type { Socket, RemoteInfo } from 'node:dgram';
 import type { AddressInfo } from './types.js';
 
 export type MessageHandler = (data: Uint8Array, remote: AddressInfo) => void;
+export type ErrorHandler = (err: Error) => void;
 
 export class UdpSocket {
   private socket: Socket | null = null;
   private messageHandler: MessageHandler | null = null;
+  private errorHandler: ErrorHandler | null = null;
 
   bind(port: number, address = '0.0.0.0'): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -18,10 +20,22 @@ export class UdpSocket {
       });
       sock.on('error', reject);
       sock.bind(port, address, () => {
+        sock.removeListener('error', reject);
+        sock.on('error', (err: Error) => {
+          if (this.errorHandler) {
+            this.errorHandler(err);
+          } else {
+            console.error('[UdpSocket] socket error:', err); // eslint-disable-line no-console
+          }
+        });
         this.socket = sock;
         resolve();
       });
     });
+  }
+
+  onError(handler: ErrorHandler): void {
+    this.errorHandler = handler;
   }
 
   sendTo(data: Uint8Array, host: string, port: number): void {
