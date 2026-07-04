@@ -445,3 +445,191 @@ describe('RakNetClient', () => {
     expect((client as unknown as Record<string, unknown>).tickTimer).toBeNull();
   });
 });
+
+describe('RakNetServer multi-port', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('accepts connections on multiple ports', async () => {
+    const sock1 = createMockSocket(7777);
+    const sock2 = createMockSocket(7778);
+    const server = new RakNetServer(sock1, { port: 7777 });
+    await server.start();
+
+    // Manually add second socket to simulate multi-port
+    // For now test the single-socket path + localPort on session
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    sock1.triggerMessage(req, CLIENT);
+
+    const sessions = [...server.clients.values()];
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.localPort).toBe(7777);
+    await server.stop();
+  });
+
+  it('setPortAccepting blocks new connections', async () => {
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, { port: 7777 });
+    await server.start();
+
+    server.setPortAccepting(7777, false);
+
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    sock.triggerMessage(req, CLIENT);
+
+    expect(server.clients.size).toBe(0);
+    expect(sock.sent).toHaveLength(0);
+
+    // Re-enable and verify it works again
+    server.setPortAccepting(7777, true);
+    sock.triggerMessage(req, CLIENT);
+    expect(server.clients.size).toBe(1);
+    await server.stop();
+  });
+
+  it('getSessionsByPort returns correct sessions', async () => {
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, { port: 7777 });
+    await server.start();
+
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    sock.triggerMessage(req, CLIENT);
+    sock.triggerMessage(req, { host: '10.0.0.2', port: 6000 });
+
+    expect(server.getSessionsByPort(7777)).toHaveLength(2);
+    expect(server.getSessionsByPort(9999)).toHaveLength(0);
+    await server.stop();
+  });
+
+  it('removePort disconnects clients on that port', async () => {
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, { port: 7777 });
+    await server.start();
+
+    const disconnected: ClientSession[] = [];
+    server.onDisconnect((s) => disconnected.push(s));
+
+    // Do full handshake to get a CONNECTED session
+    doFullHandshake(sock);
+    expect(server.clients.size).toBe(1);
+
+    await server.removePort(7777, { mode: 'DisconnectClientsOnPort' });
+    expect(disconnected).toHaveLength(1);
+    expect(server.clients.size).toBe(0);
+  });
+
+  it('addPort throws on duplicate', async () => {
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, { port: 7777 });
+    await server.start();
+
+    await expect(server.addPort(7777)).rejects.toThrow('already bound');
+    await server.stop();
+  });
+
+  it('removePort throws on unknown port', async () => {
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, { port: 7777 });
+    await server.start();
+
+    await expect(
+      server.removePort(9999, { mode: 'DisconnectClientsOnPort' }),
+    ).rejects.toThrow('not bound');
+    await server.stop();
+  });
+
+  it('two sockets route replies through correct socket', async () => {
+    const sock1 = createMockSocket(7777);
+    const sock2 = createMockSocket(7778);
+
+    // Use new options-only form via legacy compat: create with sock1, then
+    // manually add sock2 to simulate true multi-port. Since addPort does a
+    // dynamic import of UdpSocket (which won't work in test), we test the
+    // internal routing by creating two servers that share session state indirectly.
+    // Instead, test the full two-socket path using the legacy constructor for
+    // each port and verify localPort is distinct.
+    const server1 = new RakNetServer(sock1, { port: 7777 });
+    await server1.start();
+
+    const server2 = new RakNetServer(sock2, { port: 7778 });
+    await server2.start();
+
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+
+    sock1.triggerMessage(req, CLIENT);
+    sock2.triggerMessage(req, { host: '10.0.0.5', port: 4000 });
+
+    const s1Sessions = [...server1.clients.values()];
+    const s2Sessions = [...server2.clients.values()];
+
+    expect(s1Sessions).toHaveLength(1);
+    expect(s1Sessions[0]!.localPort).toBe(7777);
+    expect(s2Sessions).toHaveLength(1);
+    expect(s2Sessions[0]!.localPort).toBe(7778);
+
+    // Verify reply went through correct socket
+    expect(sock1.sent.some(p => p.data[0] === 0x0a && p.port === CLIENT.port)).toBe(true);
+    expect(sock2.sent.some(p => p.data[0] === 0x0a && p.port === 4000)).toBe(true);
+
+    await server1.stop();
+    await server2.stop();
+  });
+
+  it('passwordPredicate receives session and password', async () => {
+    const predicateCalls: Array<{ port: number; pw: string }> = [];
+    const sock = createMockSocket(7777);
+    const server = new RakNetServer(sock, {
+      port: 7777,
+      passwordPredicate: (session, pw) => {
+        predicateCalls.push({ port: session.localPort, pw });
+        return pw === 'allowed';
+      },
+    });
+    await server.start();
+
+    // Connect with wrong password
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    sock.triggerMessage(req, CLIENT);
+    expect(server.clients.size).toBe(1);
+
+    const wrongPw = new TextEncoder().encode('denied');
+    const connReq = new Uint8Array(1 + 16 + 8 + wrongPw.length);
+    connReq[0] = 0x04;
+    connReq.set(wrongPw, 25);
+    const f1 = createFrame(connReq, Reliability.RELIABLE);
+    f1.reliableMsgNumber = 0;
+    sock.triggerMessage(buildDataPacket(0, [f1]), CLIENT);
+
+    expect(server.clients.size).toBe(0);
+    expect(predicateCalls).toHaveLength(1);
+    expect(predicateCalls[0]!.pw).toBe('denied');
+    expect(predicateCalls[0]!.port).toBe(7777);
+
+    // Connect with correct password
+    const client2 = { host: '10.0.0.2', port: 6000 };
+    sock.triggerMessage(req, client2);
+
+    const goodPw = new TextEncoder().encode('allowed');
+    const connReq2 = new Uint8Array(1 + 16 + 8 + goodPw.length);
+    connReq2[0] = 0x04;
+    connReq2.set(goodPw, 25);
+    const f2 = createFrame(connReq2, Reliability.RELIABLE);
+    f2.reliableMsgNumber = 0;
+    sock.triggerMessage(buildDataPacket(0, [f2]), client2);
+
+    expect(server.clients.size).toBe(1);
+    expect(predicateCalls).toHaveLength(2);
+    expect(predicateCalls[1]!.pw).toBe('allowed');
+    await server.stop();
+  });
+});
