@@ -49,6 +49,7 @@ export class MasterClient {
     msgIds: number[];
     resolve: (msg: IncomingMessage) => void;
     reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   }> = [];
 
   constructor() {
@@ -68,6 +69,11 @@ export class MasterClient {
   }
 
   async close(): Promise<void> {
+    for (const pending of this.pendingResolvers) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('MasterClient closed'));
+    }
+    this.pendingResolvers = [];
     await this.client.close();
   }
 
@@ -146,18 +152,21 @@ export class MasterClient {
   private waitForMessage(msgIds: number[], timeout: number): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const idx = this.pendingResolvers.findIndex((p) => p.resolve === resolve);
+        const idx = this.pendingResolvers.findIndex((p) => p.resolve === wrappedResolve);
         if (idx >= 0) this.pendingResolvers.splice(idx, 1);
         reject(new Error('Timeout waiting for response'));
       }, timeout);
 
+      const wrappedResolve = (msg: IncomingMessage): void => {
+        clearTimeout(timer);
+        resolve(msg);
+      };
+
       this.pendingResolvers.push({
         msgIds,
-        resolve: (msg) => {
-          clearTimeout(timer);
-          resolve(msg);
-        },
+        resolve: wrappedResolve,
         reject,
+        timer,
       });
     });
   }

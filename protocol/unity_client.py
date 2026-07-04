@@ -117,7 +117,8 @@ class UnityClient:
             if duration and (time.monotonic() - start) >= duration:
                 break
             self.poll(interval)
-            self._raknet.peer.check_retransmits()
+            if self._raknet.peer:
+                self._raknet.peer.check_retransmits()
 
     def _handle_rpc(self, payload, bit_length):
         try:

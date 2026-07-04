@@ -93,7 +93,9 @@ export class UnityServer {
 
     this.raknet.onConnect((session) => {
       this.peerIndices.set(session.id, new Map());
-      for (const h of this.connectHandlers) h(session);
+      for (const h of this.connectHandlers) {
+        try { h(session); } catch (err) { console.error('[UnityServer] connect handler error:', err); }
+      }
     });
 
     this.raknet.onDisconnect((session) => {
@@ -104,7 +106,9 @@ export class UnityServer {
           this.deltaState.delete(key);
         }
       }
-      for (const h of this.disconnectHandlers) h(session);
+      for (const h of this.disconnectHandlers) {
+        try { h(session); } catch (err) { console.error('[UnityServer] disconnect handler error:', err); }
+      }
     });
 
     this.raknet.onMessage((session, msg) => {
@@ -261,15 +265,20 @@ export class UnityServer {
 
     let result: { data: Uint8Array; bitLength: number };
     const opts = { methodName, params, timestampMs: uptimeMs, mode, targetView, ...(relay && { relay }) };
-    const peerIdx = this.usePeerBatchIndices
-      ? this.peerIndices.get(session.id)?.get(methodName)
-      : undefined;
-    if (peerIdx !== undefined) {
-      result = encodeRpcSubsequent({ ...opts, methodIndex: peerIdx });
-    } else if (hasMethodIndex(methodName)) {
-      result = encodeRpcSubsequent(opts);
-    } else {
-      result = encodeRpcFirstUse(opts);
+    try {
+      const peerIdx = this.usePeerBatchIndices
+        ? this.peerIndices.get(session.id)?.get(methodName)
+        : undefined;
+      if (peerIdx !== undefined) {
+        result = encodeRpcSubsequent({ ...opts, methodIndex: peerIdx });
+      } else if (hasMethodIndex(methodName)) {
+        result = encodeRpcSubsequent(opts);
+      } else {
+        result = encodeRpcFirstUse(opts);
+      }
+    } catch (err) {
+      console.error(`[UnityServer] RPC encode error for ${methodName}:`, err); // eslint-disable-line no-console
+      return;
     }
 
     this.raknet.sendTo(session, result.data, Reliability.RELIABLE_ORDERED, result.bitLength);

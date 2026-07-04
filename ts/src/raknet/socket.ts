@@ -15,7 +15,15 @@ export class UdpSocket {
       const sock = createSocket('udp4');
       sock.on('message', (msg: Buffer, rinfo: RemoteInfo) => {
         if (this.messageHandler) {
-          this.messageHandler(new Uint8Array(msg), { host: rinfo.address, port: rinfo.port });
+          try {
+            this.messageHandler(new Uint8Array(msg), { host: rinfo.address, port: rinfo.port });
+          } catch (err) {
+            if (this.errorHandler) {
+              this.errorHandler(err instanceof Error ? err : new Error(String(err)));
+            } else {
+              console.error('[UdpSocket] unhandled error in message handler:', err); // eslint-disable-line no-console
+            }
+          }
         }
       });
       sock.on('error', reject);

@@ -51,7 +51,9 @@ export class UnityClient {
     this.raknet = new RakNetClient(socket);
 
     this.raknet.onConnect(() => {
-      for (const h of this.connectHandlers) h();
+      for (const h of this.connectHandlers) {
+        try { h(); } catch (err) { console.error('[UnityClient] connect handler error:', err); }
+      }
     });
 
     this.raknet.onDisconnect(() => {
@@ -60,7 +62,9 @@ export class UnityClient {
       this.ourIndices.clear();
       this.ourIndexReverse.clear();
       this.nextOurIndex = 4;
-      for (const h of this.disconnectHandlers) h('disconnected');
+      for (const h of this.disconnectHandlers) {
+        try { h('disconnected'); } catch (err) { console.error('[UnityClient] disconnect handler error:', err); }
+      }
     });
 
     this.raknet.onMessage((msg) => {
@@ -217,7 +221,11 @@ export class UnityClient {
 
     const handler = this.rpcHandlers.get(decoded.methodName);
     if (handler) {
-      handler(...decoded.params);
+      try {
+        handler(...decoded.params);
+      } catch (err) {
+        console.error(`[UnityClient] RPC handler error for ${decoded.methodName}:`, err);
+      }
     }
   }
 

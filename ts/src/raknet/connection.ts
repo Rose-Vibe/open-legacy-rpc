@@ -247,49 +247,57 @@ export class RakNetServer {
   private pingCounter = 0;
 
   private tick(): void {
-    this.pingCounter++;
-    for (const session of this.sessionsByAddr.values()) {
-      if (session.state === ConnectionState.CONNECTED && this.pingCounter % 15 === 0) {
-        const ping = new Uint8Array(9);
-        ping[0] = 0x00;
-        writeU32BE(ping, 5, session.reliability.getTimestampMs());
-        session.reliability.queueOutgoing(ping, Reliability.UNRELIABLE);
+    try {
+      this.pingCounter++;
+      for (const session of this.sessionsByAddr.values()) {
+        if (session.state === ConnectionState.CONNECTED && this.pingCounter % 15 === 0) {
+          const ping = new Uint8Array(9);
+          ping[0] = 0x00;
+          writeU32BE(ping, 5, session.reliability.getTimestampMs());
+          session.reliability.queueOutgoing(ping, Reliability.UNRELIABLE);
+        }
+        const sock = this.sessionSockets.get(addrKey(session.address));
+        if (!sock) continue;
+        const packets = session.reliability.getOutgoingPackets();
+        for (const p of packets) {
+          sock.sendTo(p, session.address.host, session.address.port);
+        }
+        const retransmits = session.reliability.getRetransmitPackets();
+        for (const p of retransmits) {
+          sock.sendTo(p, session.address.host, session.address.port);
+        }
       }
-      const sock = this.sessionSockets.get(addrKey(session.address));
-      if (!sock) continue;
-      const packets = session.reliability.getOutgoingPackets();
-      for (const p of packets) {
-        sock.sendTo(p, session.address.host, session.address.port);
-      }
-      const retransmits = session.reliability.getRetransmitPackets();
-      for (const p of retransmits) {
-        sock.sendTo(p, session.address.host, session.address.port);
-      }
+    } catch (err) {
+      console.error('[RakNet] server tick error:', err);
     }
   }
 
   private handlePacket(data: Uint8Array, remote: AddressInfo, sock: UdpSocket): void {
-    const first = data[0] ?? 0;
-    const routeKey = addrKey(remote);
+    try {
+      const first = data[0] ?? 0;
+      const routeKey = addrKey(remote);
 
-    if (first === 0x09) {
-      this.handleOpenConnectionRequest(remote, data, routeKey, sock);
-      return;
-    }
+      if (first === 0x09) {
+        this.handleOpenConnectionRequest(remote, data, routeKey, sock);
+        return;
+      }
 
-    const session = this.sessionsByAddr.get(routeKey);
-    if (!session) return;
+      const session = this.sessionsByAddr.get(routeKey);
+      if (!session) return;
 
-    const messages = session.reliability.processIncoming(data);
-    for (const msg of messages) {
-      if (!msg.payload.length) continue;
-      const msgId = msg.payload[0] ?? 0;
-      const handled = this.handleInternal(session, msgId, msg.payload);
-      if (!handled) {
-        for (const h of this.messageHandlers) {
-          h(session, msg);
+      const messages = session.reliability.processIncoming(data);
+      for (const msg of messages) {
+        if (!msg.payload.length) continue;
+        const msgId = msg.payload[0] ?? 0;
+        const handled = this.handleInternal(session, msgId, msg.payload);
+        if (!handled) {
+          for (const h of this.messageHandlers) {
+            h(session, msg);
+          }
         }
       }
+    } catch (err) {
+      console.error(`[RakNet] error handling packet from ${remote.host}:${remote.port}:`, err);
     }
   }
 
@@ -435,7 +443,7 @@ export class RakNetServer {
 
     session.state = ConnectionState.CONNECTED;
     for (const h of this.connectHandlers) {
-      h(session);
+      try { h(session); } catch (err) { console.error('[RakNet] connect handler error:', err); }
     }
   }
 
@@ -462,7 +470,7 @@ export class RakNetServer {
     }
     this.removeSession(session);
     for (const h of this.disconnectHandlers) {
-      h(session);
+      try { h(session); } catch (err) { console.error('[RakNet] disconnect handler error:', err); }
     }
   }
 
@@ -543,10 +551,12 @@ export class RakNetClient {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        this._state = ConnectionState.DISCONNECTED;
         if (this.tickTimer) {
           clearInterval(this.tickTimer);
           this.tickTimer = null;
         }
+        this.socket.close().catch(() => {});
         reject(new Error('Connection timed out'));
       }, timeout);
 
@@ -614,37 +624,45 @@ export class RakNetClient {
   }
 
   private tick(): void {
-    if (!this.reliability) return;
-    const packets = this.reliability.getOutgoingPackets();
-    for (const p of packets) {
-      this.socket.sendTo(p, this.serverHost, this.serverPort);
-    }
-    const retransmits = this.reliability.getRetransmitPackets();
-    for (const p of retransmits) {
-      this.socket.sendTo(p, this.serverHost, this.serverPort);
+    try {
+      if (!this.reliability) return;
+      const packets = this.reliability.getOutgoingPackets();
+      for (const p of packets) {
+        this.socket.sendTo(p, this.serverHost, this.serverPort);
+      }
+      const retransmits = this.reliability.getRetransmitPackets();
+      for (const p of retransmits) {
+        this.socket.sendTo(p, this.serverHost, this.serverPort);
+      }
+    } catch (err) {
+      console.error('[RakNet] client tick error:', err);
     }
   }
 
   private handlePacket(data: Uint8Array): void {
-    const first = data[0] ?? 0;
+    try {
+      const first = data[0] ?? 0;
 
-    if (first === 0x0a) {
-      this.handleOpenConnectionReply();
-      return;
-    }
+      if (first === 0x0a) {
+        this.handleOpenConnectionReply();
+        return;
+      }
 
-    if (!this.reliability) return;
+      if (!this.reliability) return;
 
-    const messages = this.reliability.processIncoming(data);
-    for (const msg of messages) {
-      if (!msg.payload.length) continue;
-      const msgId = msg.payload[0] ?? 0;
-      const handled = this.handleInternal(msgId, msg.payload);
-      if (!handled) {
-        for (const h of this.messageHandlers) {
-          h(msg);
+      const messages = this.reliability.processIncoming(data);
+      for (const msg of messages) {
+        if (!msg.payload.length) continue;
+        const msgId = msg.payload[0] ?? 0;
+        const handled = this.handleInternal(msgId, msg.payload);
+        if (!handled) {
+          for (const h of this.messageHandlers) {
+            h(msg);
+          }
         }
       }
+    } catch (err) {
+      console.error('[RakNet] error handling packet:', err);
     }
   }
 
@@ -667,7 +685,7 @@ export class RakNetClient {
     if (msgId === 0x15) {
       this._state = ConnectionState.DISCONNECTED;
       for (const h of this.disconnectHandlers) {
-        h();
+        try { h(); } catch (err) { console.error('[RakNet] disconnect handler error:', err); }
       }
       return true;
     }
@@ -726,7 +744,7 @@ export class RakNetClient {
     // send 0x81. The connection is usable after 0x83 either way.
     this._state = ConnectionState.CONNECTED;
     for (const h of this.connectHandlers) {
-      h();
+      try { h(); } catch (err) { console.error('[RakNet] connect handler error:', err); }
     }
   }
 

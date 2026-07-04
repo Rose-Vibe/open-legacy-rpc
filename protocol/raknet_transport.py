@@ -301,6 +301,12 @@ class SplitPacketAssembler:
         self._pending[sid][msg.split_packet_index] = msg.payload
 
         if len(self._pending[sid]) == self._counts[sid]:
+            if not all(i in self._pending[sid] for i in range(self._counts[sid])):
+                log.warning("RakNet decode: split reassembly has count match but missing indices, dropping split_id=%d", sid)
+                del self._pending[sid]
+                del self._counts[sid]
+                del self._timestamps[sid]
+                return None
             parts = [self._pending[sid][i] for i in range(self._counts[sid])]
             full_payload = b''.join(parts)
             del self._pending[sid]
