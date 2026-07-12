@@ -190,7 +190,7 @@ describe('decode safety caps', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const bs = new BitStream();
       bs.writeU8(0x07);
-      bs.writeU32BE(300); // halfBits=300 => methodIdBits=600 => hashBytes=69 > 64
+      bs.writeBits(150, 31); // quarterBits=150 => methodIdBits=600 => hashBytes=69 > 64
       const payload = new Uint8Array(100);
       const prefix = bs.toBytes();
       payload.set(prefix);

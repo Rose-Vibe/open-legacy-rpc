@@ -585,13 +585,12 @@ def encode_batch_index(method_name, method_index):
 
     bs = BitStream()
     bs.write_u8(MSG_ID_BATCH_INDEX)
-    bs.write_u32_be(method_id_bits // 2)
-    bs.write_bit(0)
+    bs.write_bits(method_id_bits // 4, 31)
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
     bs.write_bits(method_index >> 2, 5)
 
-    total_bits = 8 + 32 + 1 + method_id_bits + 5
+    total_bits = 8 + 31 + method_id_bits + 5
     while bs.bit_length % 8 != 0:
         bs.write_bit(0)
 
@@ -608,8 +607,8 @@ def decode_batch_index(payload):
 
     bs = BitStream(payload)
     bs.read_u8()  # msg_id
-    half_bits = bs.read_u32_be()
-    method_id_bits = half_bits * 2
+    quarter_bits = bs.read_bits(31)
+    method_id_bits = quarter_bits * 4
     hash_bytes = method_id_bits // 8 - 6
     if hash_bytes < 0:
         return None
@@ -617,7 +616,6 @@ def decode_batch_index(payload):
         log.warning("RakNet decode: batchIndex hashBytes exceeds cap (%d > 64), rejecting", hash_bytes)
         return None
 
-    bs.read_bit()  # flag (always 0)
     bs.read_bytes(6)  # class_guid
     method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
     method_index = bs.read_bits(5) << 2

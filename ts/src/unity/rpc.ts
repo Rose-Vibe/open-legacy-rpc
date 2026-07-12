@@ -469,13 +469,12 @@ export function encodeBatchIndex(
 
   const bs = new BitStream();
   bs.writeU8(MSG_ID_BATCH_INDEX);
-  bs.writeU32BE(methodIdBits / 2);
-  bs.writeBit(0); // flag
+  bs.writeBits(methodIdBits / 4, 31);
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
   bs.writeBits(methodIndex >> 2, 5);
 
-  const totalBits = 8 + 32 + 1 + methodIdBits + 5;
+  const totalBits = 8 + 31 + methodIdBits + 5;
   // pad to byte boundary
   while (bs.pos % 8 !== 0) {
     bs.writeBit(0);
@@ -495,8 +494,8 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
 
   const bs = new BitStream(payload);
   bs.readU8(); // msg_id
-  const halfBits = bs.readU32BE();
-  const methodIdBits = halfBits * 2;
+  const quarterBits = bs.readBits(31);
+  const methodIdBits = quarterBits * 4;
   const hashBytes = methodIdBits / 8 - 6;
   if (hashBytes < 0) return null;
   if (hashBytes > 64) {
@@ -504,7 +503,6 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
     return null;
   }
 
-  bs.readBit(); // flag (always 0)
   bs.readBytes(6); // classGuid (skip)
   const methodHash = hashBytes > 0 ? bs.readBytes(hashBytes) : new Uint8Array(0);
   const methodIndex = bs.readBits(5) << 2;

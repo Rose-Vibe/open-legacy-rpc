@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeMethodId, computeMethodIndex } from '../src/unity/method-hash.js';
+import { computeMethodId, computeMethodIndex, registerMethodNames } from '../src/unity/method-hash.js';
 import { encodeViewId16, decodeViewId16, encodeViewId, decodeViewIdBits } from '../src/unity/view-id.js';
 import { BitStream } from '../src/bitstream.js';
 import { decodeQueryReply, encodeQueryReply } from '../src/master/serialization.js';
@@ -27,6 +27,12 @@ function bytesToHex(bytes: Uint8Array): string {
     hex += (bytes[i] ?? 0).toString(16).padStart(2, '0');
   }
   return hex;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
 }
 
 describe('Batch Index (0x07)', () => {
@@ -68,6 +74,58 @@ describe('Batch Index (0x07)', () => {
     const { data } = encodeBatchIndex('RPC_Int', 124);
     const decoded = decodeBatchIndex(data);
     expect(decoded!.methodIndex).toBe(124);
+  });
+
+  // Real msg_id 0x07 frames captured from a live Distance client session
+  // (reference-server capture, packet indices 19 and 21). Verifies the
+  // header before classGuid is 31 bits with no separate flag bit, not
+  // 32 bits + 1 flag bit — the previous framing silently corrupted every
+  // client-sent batch-index registration, so `peerIndices` never populated.
+  it('decodes real captured batch-index frames from a Distance client', () => {
+    registerMethodNames([
+      'ReceiveClientToServerEvent',
+      'ReceiveBroadcastAllEvent',
+      'ReceiveSerializeEvent',
+      'ReceiveServerToClientEvent',
+      'ReceiveTargetedEventServerToClient',
+      'SubmitServerNetworkTimeSync',
+      'ReceiveServerNetworkTimeSync',
+    ]);
+
+    const cases = [
+      {
+        raw: '070000005c190501278a93666161cab4f057560ccf19a944ed9202b554',
+        name: 'ReceiveTargetedEventServerToClient',
+        classGuid: '0c828093c549',
+        methodHash: 'b330b0e55a782bab06678cd4a276c9015a',
+        methodIndex: 84,
+      },
+      {
+        raw: '0700000050558b3f44bab06678c9885d3197f524d05595950ae8',
+        name: 'SubmitServerNetworkTimeSync',
+        classGuid: '2ac59fa25d58',
+        methodHash: '333c64c42e98cbfa92682acaca85',
+        methodIndex: 56,
+      },
+      {
+        raw: '07000000481905012789db24057528ab06678caad3c15ad4',
+        name: 'ReceiveClientToServerEvent',
+        classGuid: '0c828093c4ed',
+        methodHash: '9202ba94558333c65569e0ad',
+        methodIndex: 52,
+      },
+    ] as const;
+
+    for (const c of cases) {
+      const decoded = decodeBatchIndex(hexToBytes(c.raw));
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodName).toBe(c.name);
+      expect(decoded!.methodIndex).toBe(c.methodIndex);
+
+      const { classGuid, methodHash } = computeMethodId(c.name);
+      expect(bytesToHex(classGuid)).toBe(c.classGuid);
+      expect(bytesToHex(methodHash)).toBe(c.methodHash);
+    }
   });
 });
 
