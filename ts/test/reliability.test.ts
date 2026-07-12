@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ReliabilityLayer } from '../src/raknet/reliability.js';
 import { Reliability, createFrame } from '../src/raknet/types.js';
 import { buildDataPacket, buildAck, parsePacket } from '../src/raknet/packet.js';
@@ -249,6 +249,58 @@ describe('ReliabilityLayer', () => {
       }
       const assembler = (rl as unknown as Record<string, Map<number, unknown>>).splitAssembler;
       expect(assembler.size).toBeLessThanOrEqual(64);
+    });
+  });
+
+  describe('lastReceivedAtMs', () => {
+    it('initializes to construction time and updates on every data packet', () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(1000);
+        const rl = makeReliability();
+        expect(rl.getLastReceivedAtMs()).toBe(1000);
+
+        vi.setSystemTime(5000);
+        const frame = createFrame(new Uint8Array([0x01]), Reliability.UNRELIABLE);
+        rl.processIncoming(buildDataPacket(0, [frame]));
+        expect(rl.getLastReceivedAtMs()).toBe(5000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('stale reliable frame drop warning', () => {
+    it('logs a warning when reliableMsgNumber is below seenReliableMin', () => {
+      const rl = makeReliability();
+      // Push seenReliableMin forward via the existing prune-at-10000 path.
+      for (let i = 0; i < 15000; i++) {
+        const frame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+        frame.reliableMsgNumber = i;
+        rl.processIncoming(buildDataPacket(i, [frame]));
+      }
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const staleFrame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+      staleFrame.reliableMsgNumber = 0;
+      rl.processIncoming(buildDataPacket(99998, [staleFrame]));
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]![0]).toContain('stale reliable frame');
+      warnSpy.mockRestore();
+    });
+
+    it('does not log for an ordinary already-seen duplicate', () => {
+      const rl = makeReliability();
+      const frame = createFrame(new Uint8Array([0x01]), Reliability.RELIABLE);
+      frame.reliableMsgNumber = 0;
+      rl.processIncoming(buildDataPacket(0, [frame]));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      rl.processIncoming(buildDataPacket(1, [frame]));
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 

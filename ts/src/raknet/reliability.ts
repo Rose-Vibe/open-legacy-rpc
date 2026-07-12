@@ -29,6 +29,7 @@ export class ReliabilityLayer {
   private splitIdCounter = 0;
   private pendingAcks: number[] = [];
   private lastReceivedTimestamp = 0;
+  private lastReceivedAtMs: number;
   private unackedReliable: Map<number, UnackedEntry> = new Map();
   private outgoingQueue: Frame[] = [];
   private seenReliable: Set<number> = new Set();
@@ -39,6 +40,7 @@ export class ReliabilityLayer {
   constructor(remoteAddress: AddressInfo, epochNs?: bigint) {
     this.remoteAddress = remoteAddress;
     this.epochNs = epochNs ?? process.hrtime.bigint();
+    this.lastReceivedAtMs = Date.now();
   }
 
   getTimestampMs(): number {
@@ -51,6 +53,11 @@ export class ReliabilityLayer {
 
   getLastReceivedTimestamp(): number {
     return this.lastReceivedTimestamp;
+  }
+
+  /** Local wall-clock time (ms, `Date.now()`) this layer last received any datagram from its peer. Used for liveness/timeout tracking — distinct from `getLastReceivedTimestamp()`, which is the peer's own self-reported clock value. */
+  getLastReceivedAtMs(): number {
+    return this.lastReceivedAtMs;
   }
 
   queueOutgoing(payload: Uint8Array, reliability: Reliability, orderingChannel = 0, bitLength?: number): void {
@@ -115,6 +122,7 @@ export class ReliabilityLayer {
       case 'data':
         this.pendingAcks.push(parsed.sequenceNumber);
         this.lastReceivedTimestamp = parsed.timestamp;
+        this.lastReceivedAtMs = Date.now();
         if (parsed.sequenceNumber > this.recvSeqMax) {
           this.recvSeqMax = parsed.sequenceNumber;
         }
@@ -195,10 +203,15 @@ export class ReliabilityLayer {
     const messages: IncomingMessage[] = [];
     for (const frame of frames) {
       if (isReliable(frame.reliability) && frame.reliableMsgNumber !== null) {
-        if (
-          frame.reliableMsgNumber < this.seenReliableMin ||
-          this.seenReliable.has(frame.reliableMsgNumber)
-        ) {
+        if (frame.reliableMsgNumber < this.seenReliableMin) {
+          console.warn(
+            `RakNet: dropping stale reliable frame from ${this.remoteAddress.host}:${this.remoteAddress.port} ` +
+              `(reliableMsgNumber=${frame.reliableMsgNumber} < seenReliableMin=${this.seenReliableMin}) — ` +
+              `likely a reused address routing to an advanced session`,
+          );
+          continue;
+        }
+        if (this.seenReliable.has(frame.reliableMsgNumber)) {
           continue;
         }
         this.seenReliable.add(frame.reliableMsgNumber);

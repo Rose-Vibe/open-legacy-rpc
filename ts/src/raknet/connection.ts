@@ -73,6 +73,8 @@ export interface RakNetServerOptions {
   passwordPredicate?: (session: ClientSession, password: string) => boolean;
   viewIdStride?: number;
   epochNs?: bigint;
+  /** Idle time (ms, no datagram received) before a session is evicted as dead. Default 10000. */
+  sessionTimeoutMs?: number;
 }
 
 type EventHandler<T extends unknown[]> = (...args: T) => void;
@@ -90,6 +92,7 @@ export class RakNetServer {
   private readonly password: string;
   private readonly passwordPredicate: ((session: ClientSession, password: string) => boolean) | null;
   private readonly viewIdStride: number;
+  private readonly sessionTimeoutMs: number;
   private readonly initialPorts: number[];
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
@@ -111,6 +114,7 @@ export class RakNetServer {
       this.passwordPredicate = options.passwordPredicate ?? null;
       this.viewIdStride = options.viewIdStride ?? 50;
       this.epochNs = options.epochNs ?? process.hrtime.bigint();
+      this.sessionTimeoutMs = options.sessionTimeoutMs ?? 10_000;
     } else {
       const opts = socketOrOptions as RakNetServerOptions;
       this.initialPorts = opts.ports ?? (opts.port !== undefined ? [opts.port] : []);
@@ -118,6 +122,7 @@ export class RakNetServer {
       this.passwordPredicate = opts.passwordPredicate ?? null;
       this.viewIdStride = opts.viewIdStride ?? 50;
       this.epochNs = opts.epochNs ?? process.hrtime.bigint();
+      this.sessionTimeoutMs = opts.sessionTimeoutMs ?? 10_000;
     }
   }
 
@@ -249,6 +254,13 @@ export class RakNetServer {
   private tick(): void {
     try {
       this.pingCounter++;
+      const now = Date.now();
+      for (const session of this.sessionsByAddr.values()) {
+        const idleMs = now - session.reliability.getLastReceivedAtMs();
+        if (idleMs > this.sessionTimeoutMs) {
+          this.handleDisconnect(session, `session timeout (idle ${String(idleMs)}ms)`);
+        }
+      }
       for (const session of this.sessionsByAddr.values()) {
         if (session.state === ConnectionState.CONNECTED && this.pingCounter % 15 === 0) {
           const ping = new Uint8Array(9);
@@ -460,15 +472,18 @@ export class RakNetServer {
         sock.sendTo(p, session.address.host, session.address.port);
       }
     }
-    this.handleDisconnect(session);
+    this.handleDisconnect(session, 'server-initiated disconnect');
   }
 
-  private handleDisconnect(session: ClientSession): void {
+  private handleDisconnect(session: ClientSession, reason = 'client disconnect'): void {
     session.state = ConnectionState.DISCONNECTED;
     if (session.playerIndex > 0) {
       this.freePlayerIndices.push(session.playerIndex);
     }
     this.removeSession(session);
+    console.log(
+      `[RakNet] session ${session.id} (${session.address.host}:${String(session.address.port)}) removed: ${reason}`,
+    );
     for (const h of this.disconnectHandlers) {
       try { h(session); } catch (err) { console.error('[RakNet] disconnect handler error:', err); }
     }

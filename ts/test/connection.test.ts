@@ -349,6 +349,97 @@ describe('RakNetServer', () => {
   });
 });
 
+describe('RakNetServer session eviction', () => {
+  let serverSocket: MockSocket;
+  let server: RakNetServer;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    serverSocket = createMockSocket(7777);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('evicts a CONNECTED session idle past sessionTimeoutMs', async () => {
+    server = new RakNetServer(serverSocket, { port: 7777, sessionTimeoutMs: 1000 });
+    await server.start();
+    const disconnectHandler = vi.fn();
+    server.onDisconnect(disconnectHandler);
+
+    doFullHandshake(serverSocket);
+    expect(server.clients.size).toBe(1);
+    const session = [...server.clients.values()][0]!;
+
+    vi.advanceTimersByTime(1100);
+
+    expect(disconnectHandler).toHaveBeenCalledTimes(1);
+    expect(server.clients.size).toBe(0);
+    expect(server.getSession(session.id)).toBeUndefined();
+    await server.stop();
+  });
+
+  it('does not evict a session that keeps receiving traffic', async () => {
+    server = new RakNetServer(serverSocket, { port: 7777, sessionTimeoutMs: 1000 });
+    await server.start();
+    doFullHandshake(serverSocket);
+    expect(server.clients.size).toBe(1);
+
+    // Simulate periodic pong replies well inside the timeout, spanning
+    // several timeout windows' worth of elapsed time.
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(500);
+      const pong = new Uint8Array([0x03]);
+      const frame = createFrame(pong, Reliability.UNRELIABLE);
+      serverSocket.triggerMessage(buildDataPacket(10 + i, [frame]), CLIENT);
+    }
+
+    expect(server.clients.size).toBe(1);
+    await server.stop();
+  });
+
+  it('evicts a CONNECTING session idle past sessionTimeoutMs', async () => {
+    server = new RakNetServer(serverSocket, { port: 7777, sessionTimeoutMs: 1000 });
+    await server.start();
+    const disconnectHandler = vi.fn();
+    server.onDisconnect(disconnectHandler);
+
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    serverSocket.triggerMessage(req, CLIENT);
+    expect(server.clients.size).toBe(1);
+    expect([...server.clients.values()][0]!.state).toBe(ConnectionState.CONNECTING);
+
+    vi.advanceTimersByTime(1100);
+
+    expect(disconnectHandler).toHaveBeenCalledTimes(1);
+    expect(server.clients.size).toBe(0);
+    await server.stop();
+  });
+
+  it('allows a fresh connection from the same address after eviction', async () => {
+    server = new RakNetServer(serverSocket, { port: 7777, sessionTimeoutMs: 1000 });
+    await server.start();
+
+    doFullHandshake(serverSocket);
+    const firstId = [...server.clients.values()][0]!.id;
+
+    vi.advanceTimersByTime(1100);
+    expect(server.clients.size).toBe(0);
+
+    const req = new Uint8Array(1464);
+    req[0] = 0x09;
+    serverSocket.triggerMessage(req, CLIENT);
+
+    expect(server.clients.size).toBe(1);
+    const newSession = [...server.clients.values()][0]!;
+    expect(newSession.id).not.toBe(firstId);
+    expect(newSession.state).toBe(ConnectionState.CONNECTING);
+    await server.stop();
+  });
+});
+
 describe('RakNetClient', () => {
   afterEach(() => {
     vi.useRealTimers();
