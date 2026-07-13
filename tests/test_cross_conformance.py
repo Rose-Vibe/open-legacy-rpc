@@ -9,7 +9,7 @@ from protocol.unity_protocol import (
     encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
     encode_batch_index, decode_batch_index,
     RPCMode, INTERNAL_RPC_CONSTANT, METHOD_TAG_MAP,
-    METHOD_INDEX_MAP, INDEX_TO_METHOD, register_method_indices,
+    register_method_tag,
 )
 
 
@@ -34,7 +34,7 @@ GOLDEN = {
                    'timestampMs': 500, 'mode': RPCMode.Server},
     },
     'fu_int_42': {
-        'hex': '1b00000000000000000b800000100c93b276d5b1d456400000033200000000002a',
+        'hex': '1b00000000000000000b800000100c93b276d5b1d456800000033200000000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42],
                    'timestampMs': 0, 'mode': RPCMode.Server},
@@ -54,12 +54,12 @@ GOLDEN = {
 }
 
 GOLDEN_TAG = {
-    'fu_int_42_tag8': {
-        'hex': '1b00000000000000000b800000100c93b276d5b1d456800000033200000000002a',
+    'fu_int_42_tag12': {
+        'hex': '1b00000000000000000b800000100c93b276d5b1d456c00000033200000000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42],
                    'timestampMs': 0, 'mode': RPCMode.Server},
-        'tag': ('RPC_Int', 8),
+        'tag': ('RPC_Int', 12),
     },
 }
 
@@ -71,7 +71,7 @@ GOLDEN_MODES = {
                    'timestampMs': 0, 'mode': RPCMode.Others},
     },
     'fu_int_42_others': {
-        'hex': '1b00000000000000000b800000100c93b276d5b1d456400000033200010000002a',
+        'hex': '1b00000000000000000b800000100c93b276d5b1d456800000033200010000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42],
                    'timestampMs': 0, 'mode': RPCMode.Others},
@@ -93,7 +93,7 @@ GOLDEN_CONSTANT = {
         'constant': 0x2640,
     },
     'fu_int_42_const2640': {
-        'hex': '1b00000000000000000b800000100c93b276d5b1d456400000033264000000002a',
+        'hex': '1b00000000000000000b800000100c93b276d5b1d456800000033264000000002a',
         'bits': 264,
         'params': {'methodName': 'RPC_Int', 'params': [42],
                    'timestampMs': 0, 'mode': RPCMode.Server},
@@ -109,7 +109,7 @@ GOLDEN_RELAY = {
                    'timestampMs': 0, 'mode': RPCMode.Others},
     },
     'fu_int_42_relay': {
-        'hex': '1b00000000000000000b800000100c93b276d5b1d456400000038200010000002a00',
+        'hex': '1b00000000000000000b800000100c93b276d5b1d456800000038200010000002a00',
         'bits': 269,
         'params': {'methodName': 'RPC_Int', 'params': [42],
                    'timestampMs': 0, 'mode': RPCMode.Others},
@@ -161,23 +161,17 @@ def test_subsequent_player_mode_matches_ts():
 
 
 def test_first_use_with_method_tag_matches_ts():
-    entry = GOLDEN_TAG['fu_int_42_tag8']
+    entry = GOLDEN_TAG['fu_int_42_tag12']
     name, tag = entry['tag']
     saved_tag = dict(METHOD_TAG_MAP)
-    saved_index = dict(METHOD_INDEX_MAP)
-    saved_reverse = dict(INDEX_TO_METHOD)
     try:
-        register_method_indices({name: tag})
+        register_method_tag(name, tag)
         data, bits = _encode(entry, first_use=True)
         assert data.hex() == entry['hex']
         assert bits == entry['bits']
     finally:
         METHOD_TAG_MAP.clear()
         METHOD_TAG_MAP.update(saved_tag)
-        METHOD_INDEX_MAP.clear()
-        METHOD_INDEX_MAP.update(saved_index)
-        INDEX_TO_METHOD.clear()
-        INDEX_TO_METHOD.update(saved_reverse)
 
 
 def test_subsequent_others_mode_matches_ts():

@@ -77,6 +77,58 @@ export const METHOD_SIGNATURES: Record<string, ParamType[]> = {
 const METHOD_INDEX_MAP = new Map<string, number>();
 const INDEX_TO_METHOD = new Map<number, string>();
 const METHOD_TAG_MAP = new Map<string, number>();
+const tagFallbackWarned = new Set<string>();
+
+/**
+ * Clear the one-time-per-method-name tag-fallback warning tracker.
+ * Tests asserting the fallback warning fires must call this in their own
+ * setup — it is not reset automatically between calls.
+ */
+export function resetTagFallbackWarnings(): void {
+  tagFallbackWarned.clear();
+}
+
+/**
+ * Register the real method_tag captured from a Unity-to-Unity pcap.
+ *
+ * method_tag cannot be derived from method_index, method name, or
+ * signature — no closed-form formula fits the known ground-truth data
+ * (see docs/research/2026-07-12-method-tag-real-derivation.md). It must
+ * be captured empirically for each compiled assembly whose RPCs will be
+ * sent first-use to a real Unity client, then registered here.
+ */
+export function registerMethodTag(methodName: string, tag: number): void {
+  METHOD_TAG_MAP.set(methodName, tag);
+}
+
+/** Register real method_tags for multiple methods. See registerMethodTag. */
+export function registerMethodTags(tags: Record<string, number>): void {
+  for (const [name, tag] of Object.entries(tags)) {
+    METHOD_TAG_MAP.set(name, tag);
+  }
+}
+
+// method_tag has no closed-form derivation from method_index, name, RID, or
+// signature (see docs/research/2026-07-12-method-tag-real-derivation.md) — it
+// must be captured empirically from a real Unity-to-Unity pcap per compiled
+// assembly. These are the 13 real values captured for the Loader test
+// assembly; other assemblies need their own captures registered via
+// registerMethodTag(s).
+const LOADER_REAL_TAGS: Record<string, number> = {
+  RPC_Void: 0,
+  RPC_Int: 8,
+  RPC_Float: 12,
+  RPC_String: 0,
+  RPC_Vector3: 8,
+  RPC_Quaternion: 8,
+  RPC_Bytes: 12,
+  RPC_IntFloatString: 8,
+  RPC_NetworkPlayer: 4,
+  RPC_NetworkViewID: 8,
+  RPC_Alpha: 4,
+  RPC_Beta: 4,
+  RPC_Gamma: 4,
+};
 
 function registerLoaderAssembly(): void {
   const INTERFACE_METHODS = 7;
@@ -99,7 +151,9 @@ function registerLoaderAssembly(): void {
     const idx = computeMethodIndex(rid, INTERFACE_METHODS);
     METHOD_INDEX_MAP.set(name, idx);
     INDEX_TO_METHOD.set(idx, name);
-    METHOD_TAG_MAP.set(name, idx & 0x0F);
+  }
+  for (const [name, tag] of Object.entries(LOADER_REAL_TAGS)) {
+    METHOD_TAG_MAP.set(name, tag);
   }
   registerMethodNames(Object.keys(METHOD_SIGNATURES));
   registerMethodNames([...INTERNAL_RPCS]);
@@ -120,7 +174,6 @@ export function learnMethodIndex(methodName: string, index: number): void {
   if (INDEX_TO_METHOD.has(index)) return;
   METHOD_INDEX_MAP.set(methodName, index);
   INDEX_TO_METHOD.set(index, methodName);
-  METHOD_TAG_MAP.set(methodName, index & 0x0F);
 }
 
 /**
@@ -140,7 +193,6 @@ export function registerMethodIndices(indices: Record<string, number>): void {
   for (const [name, idx] of Object.entries(indices)) {
     METHOD_INDEX_MAP.set(name, idx);
     INDEX_TO_METHOD.set(idx, name);
-    METHOD_TAG_MAP.set(name, idx & 0x0F);
   }
   registerMethodNames(Object.keys(indices));
 }
@@ -238,7 +290,18 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
   const remainingCount = paramBits + 19 + targetBits + relayBits;
-  const methodTag = METHOD_TAG_MAP.get(opts.methodName) ?? 0;
+  let methodTag = METHOD_TAG_MAP.get(opts.methodName);
+  if (methodTag === undefined) {
+    if (!tagFallbackWarned.has(opts.methodName)) {
+      tagFallbackWarned.add(opts.methodName);
+      console.warn(
+        `No captured method_tag registered for '${opts.methodName}' — falling back to ` +
+        `tag 0. This is a guess, not a derivation; if this method is sent first-use to a ` +
+        `real Unity client, capture its real tag from a pcap and register it with registerMethodTag().`
+      );
+    }
+    methodTag = 0;
+  }
   bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);
   bs.writeU16BE(remainingCount);

@@ -345,7 +345,7 @@ name hash so the receiver can register it.
 | 104 (= 13×8) | 8 | length_indicator: `method_id_bits / 4` |
 | 112–159 | 48 | class GUID = `0c 93 b2 76 d5 b1` |
 | 160+ | var | method hash (method_id_bits - 48 bits) |
-| after hash +0 | 4 | method_tag = `method_index & 0x0F` (low nibble of subsequent-use index) |
+| after hash +0 | 4 | method_tag (not derivable — must be captured empirically, see §3.3.1) |
 | +4 | 16 | reserved (must be zero) |
 | +20 | 16 | remaining_bit_count = param_bits + 19 + target_bits |
 | +36 | 16 | user_rpc_constant (see §3.6) |
@@ -369,7 +369,7 @@ format's suffix (both share the reserved + remaining_count + constant pattern):
 
 | Offset | Width | Field | Description |
 |--------|-------|-------|-------------|
-| 0 | 4 | method_tag | Low nibble of the method's subsequent-use `method_index`: `method_index & 0x0F`. Since `method_index = position × 4`, the tag cycles through 0x0, 0x4, 0x8, 0xC as position increments. |
+| 0 | 4 | method_tag | Always one of 0x0, 0x4, 0x8, 0xC. **Not derivable** from `method_index`, method name, signature, or RID — no closed-form formula fits the known ground truth (see `docs/research/2026-07-12-method-tag-real-derivation.md`, which disproves the previously-assumed `method_index & 0x0F` formula for 12 of 13 tested methods). Must be captured empirically per compiled assembly from a real Unity-to-Unity pcap. |
 | 4 | 16 | reserved | Must be zero; Unity rejects RPCs with non-zero values |
 | 20 | 16 | remaining_bit_count | `param_bits + 19 + target_bits + relay_bits` (where target_bits = 1 for RPCMode.Player, 0 otherwise; relay_bits = 5 if relayed, 0 otherwise). Same formula as subsequent-use. |
 | 36 | 16 | user_rpc_constant | Same value as subsequent-use (see §3.6) |
@@ -384,10 +384,17 @@ it will not reject the packet. That is not the same as being safe to
 ignore: distance-server's dispatch-matrix testing found that when two RPC
 methods share a tag, a real Unity client can silently misdispatch a
 first-use RPC to the wrong method's handler (the exact caching mechanism
-behind this is not confirmed, but the effect is reproducible). `method_tag`
-should always be derived from a real, registered `method_index`
-(`method_index & 0x0F`) rather than defaulted to 0 or hand-picked — see
-`docs/plans/method-tag-collision-guard.md` and spec-status.md Known Issue #1.
+behind this is not confirmed, but the effect is reproducible), and a
+controlled test against a real Unity 2018.1.6f1 client confirmed a wrong
+tag can also cause outright rejection (`Internal RPC error. Invalid RPC
+index, function not registered.`) rather than just misdispatch. `method_tag`
+must be captured empirically from a real Unity-to-Unity pcap for each
+compiled assembly whose RPCs will be sent first-use to a real Unity
+client — it is **not** derivable from `method_index` or any other static
+property. See `docs/research/2026-07-12-method-tag-real-derivation.md` for
+the ground-truth data, `docs/plans/method-tag-collision-guard.md` (erratum)
+and `docs/plans/method-tag-real-derivation-fix.md` for the corrective plan,
+and spec-status.md Known Issue #1.
 
 ### 3.3.2 Method Identifier Derivation (GUID + Hash)
 

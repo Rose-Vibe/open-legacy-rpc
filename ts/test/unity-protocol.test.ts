@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { computeMethodId, computeMethodIndex, registerMethodNames } from '../src/unity/method-hash.js';
 import { encodeViewId16, decodeViewId16, encodeViewId, decodeViewIdBits } from '../src/unity/view-id.js';
 import { BitStream } from '../src/bitstream.js';
@@ -9,6 +9,11 @@ import {
   decodeRpc,
   isRpc,
   learnMethodIndex,
+  registerMethodIndices,
+  registerMethodTag,
+  registerMethodTags,
+  resetTagFallbackWarnings,
+  hasMethodIndex,
   encodeBatchIndex,
   decodeBatchIndex,
   MSG_ID_BATCH_INDEX,
@@ -508,6 +513,97 @@ describe('RPC Encode/Decode', () => {
     const decoded = decodeRpc(encoded.data, encoded.bitLength);
     expect(decoded.methodName).toMatch(/^unknown_0x/);
     expect(decoded.params).toEqual([]);
+  });
+});
+
+// Reads the 4-bit method_tag out of a first-use RPC payload without going
+// through decodeRpc (which doesn't expose it — tag is dispatch-time only).
+function extractFirstUseTag(data: Uint8Array, bitLength: number): number {
+  const bs = new BitStream(data, bitLength);
+  bs.pos = 104;
+  const lengthIndicator = bs.readU8();
+  const methodIdBits = lengthIndicator * 4;
+  const hashExtraBits = methodIdBits - 48;
+  bs.pos = 160 + hashExtraBits;
+  return bs.readBits(4);
+}
+
+describe('method_tag registration', () => {
+  const LOADER_REAL_TAGS: Record<string, number> = {
+    RPC_Void: 0,
+    RPC_Int: 8,
+    RPC_Float: 12,
+    RPC_String: 0,
+    RPC_Vector3: 8,
+    RPC_Quaternion: 8,
+    RPC_Bytes: 12,
+    RPC_IntFloatString: 8,
+    RPC_NetworkPlayer: 4,
+    RPC_NetworkViewID: 8,
+    RPC_Alpha: 4,
+    RPC_Beta: 4,
+    RPC_Gamma: 4,
+  };
+
+  it('built-in Loader assembly tags match the ground-truth capture', () => {
+    for (const [name, tag] of Object.entries(LOADER_REAL_TAGS)) {
+      const encoded = encodeRpcFirstUse({
+        methodName: name,
+        params: [],
+        timestampMs: 0,
+        mode: RpcMode.Server,
+        targetView: 0x2000,
+      });
+      expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(tag);
+    }
+  });
+
+  it('registerMethodTag sets only the tag, not the method index', () => {
+    expect(hasMethodIndex('RPC_TagOnly')).toBe(false);
+    registerMethodTag('RPC_TagOnly', 12);
+    expect(hasMethodIndex('RPC_TagOnly')).toBe(false);
+
+    const encoded = encodeRpcFirstUse({
+      methodName: 'RPC_TagOnly',
+      params: [],
+      timestampMs: 0,
+      mode: RpcMode.Server,
+      targetView: 0x2000,
+    });
+    expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(12);
+  });
+
+  it('registerMethodTags sets tags for multiple methods at once', () => {
+    registerMethodTags({ RPC_BulkA: 4, RPC_BulkB: 12 });
+
+    const a = encodeRpcFirstUse({
+      methodName: 'RPC_BulkA', params: [], timestampMs: 0,
+      mode: RpcMode.Server, targetView: 0x2000,
+    });
+    const b = encodeRpcFirstUse({
+      methodName: 'RPC_BulkB', params: [], timestampMs: 0,
+      mode: RpcMode.Server, targetView: 0x2000,
+    });
+    expect(extractFirstUseTag(a.data, a.bitLength)).toBe(4);
+    expect(extractFirstUseTag(b.data, b.bitLength)).toBe(12);
+  });
+
+  it('registerMethodIndices/learnMethodIndex do not derive a tag', () => {
+    registerMethodIndices({ RPC_IndexOnly: 0xf0 });
+    expect(hasMethodIndex('RPC_IndexOnly')).toBe(true);
+
+    resetTagFallbackWarnings();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const encoded = encodeRpcFirstUse({
+        methodName: 'RPC_IndexOnly', params: [], timestampMs: 0,
+        mode: RpcMode.Server, targetView: 0x2000,
+      });
+      expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(0);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

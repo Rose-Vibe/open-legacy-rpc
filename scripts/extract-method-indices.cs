@@ -10,7 +10,16 @@
 //       scripts/extract-method-indices.cs -out:scripts/extract-method-indices.exe
 //   mono scripts/extract-method-indices.exe <path-to-assembly.dll>
 //
-// Output: JSON array of {name, rid, interfaceMethodsBefore, index, tag} objects.
+// Output: JSON array of {name, rid, interfaceMethodsBefore, index} objects.
+//
+// This does NOT emit method_tag. method_tag is not derivable from static IL
+// metadata (RID, index, name, or signature) — no closed-form formula fits
+// the known ground truth (see
+// docs/research/2026-07-12-method-tag-real-derivation.md). It must be
+// captured empirically from a real Unity-to-Unity pcap of this specific
+// compiled assembly, decoded per
+// docs/notes/unity-raknet-capture-decode-playbook.md, and registered via
+// registerMethodTag(s) — not computed from this tool's output.
 
 using System;
 using System.Collections.Generic;
@@ -75,25 +84,24 @@ class Program
                 if (showAll)
                 {
                     allResults.Add(FormatEntry(method.Name, rid, interfaceCount - 1,
-                        -1, -1, true, false, method.DeclaringType.FullName));
+                        -1, true, false, method.DeclaringType.FullName));
                 }
                 continue;
             }
 
             int index = (rid - 1 - interfaceCount) * 4;
-            int tag = index & 0x0F;
             bool isRpc = HasRpcAttribute(method);
 
             if (isRpc)
             {
                 results.Add(FormatEntry(method.Name, rid, interfaceCount,
-                    index, tag, false, true, method.DeclaringType.FullName));
+                    index, false, true, method.DeclaringType.FullName));
             }
 
             if (showAll)
             {
                 allResults.Add(FormatEntry(method.Name, rid, interfaceCount,
-                    index, tag, false, isRpc, method.DeclaringType.FullName));
+                    index, false, isRpc, method.DeclaringType.FullName));
             }
         }
 
@@ -140,16 +148,15 @@ class Program
     }
 
     static string FormatEntry(string name, int rid, int ifaceBefore,
-        int index, int tag, bool isInterface, bool isRpc, string typeName)
+        int index, bool isInterface, bool isRpc, string typeName)
     {
         string indexHex = index >= 0 ? string.Format("\"0x{0:x2}\"", index) : "null";
-        string tagHex = tag >= 0 ? string.Format("\"0x{0:x}\"", tag) : "null";
         return string.Format(
             "{{\"name\": \"{0}\", \"rid\": {1}, \"interfaceMethodsBefore\": {2}, " +
-            "\"index\": {3}, \"tag\": {4}, \"isInterface\": {5}, \"isRpc\": {6}, " +
-            "\"type\": \"{7}\"}}",
+            "\"index\": {3}, \"isInterface\": {4}, \"isRpc\": {5}, " +
+            "\"type\": \"{6}\"}}",
             EscapeJson(name), rid, ifaceBefore,
-            indexHex, tagHex,
+            indexHex,
             isInterface ? "true" : "false",
             isRpc ? "true" : "false",
             EscapeJson(typeName));

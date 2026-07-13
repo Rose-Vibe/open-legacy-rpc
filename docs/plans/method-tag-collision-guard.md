@@ -1,5 +1,21 @@
 # method_tag Collision Guard
 
+## Erratum (2026-07-12)
+
+The premise below — `method_tag = method_index & 0x0F` — is empirically
+disproven; see `docs/research/2026-07-12-method-tag-real-derivation.md`
+for the ground-truth data (12 of 13 tested Loader RPC methods produce a
+wrong tag under this formula). `register_method_tag(s)`/
+`registerMethodTag(s)`, removed by Fix 1 below on the reasoning that a
+correct tag could always be derived from a registered index, has been
+reinstated by `docs/plans/method-tag-real-derivation-fix.md` for exactly
+this reason — it is now the only correct way to supply a tag captured
+from a real pcap. Fix 2 (the repeated-first-use-per-peer warning) remains
+valid and unchanged by this correction — that mechanism doesn't depend on
+the tag formula being right, only on whether an index was ever learned.
+The historical body below is left as-is; it accurately records what was
+believed and done at the time.
+
 ## Context
 
 `docs/research/unity-legacy-networking-wire-format.md` §3.3.1 documents

@@ -132,6 +132,13 @@ Key observations:
 
 ### method_tag field (4-bit, first-use encoding)
 
+**Erratum (2026-07-12):** the formula below is empirically disproven for
+12 of 13 tested Loader RPC methods — see
+`docs/research/2026-07-12-method-tag-real-derivation.md`. RPC_Int's match
+here is coincidental (as is RPC_Void's, the only other match), not
+evidence the formula generalizes. `method_tag` must be captured
+empirically per compiled assembly, not derived.
+
 The 4-bit method_tag in first-use RPC messages equals `method_index & 0x0F`
 (bottom 4 bits of the 7-bit subsequent-use method_index). Verified by
 packet capture: RPC_Int has method_index=104 (0x68) and method_tag=8 (0x8).

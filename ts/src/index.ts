@@ -44,6 +44,9 @@ export {
   INTERNAL_RPC_CONSTANT,
   registerMethodIndices,
   learnMethodIndex,
+  registerMethodTag,
+  registerMethodTags,
+  resetTagFallbackWarnings,
 } from './unity/rpc.js';
 export { RpcMode } from './unity/rpc.js';
 export type { RpcEncodeOptions, DecodedRpc, RpcParam, ParamType } from './unity/rpc.js';

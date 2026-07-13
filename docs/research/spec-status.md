@@ -39,7 +39,7 @@ viewid_stride=50, constant_2=2, block_start=player*2-1, block_end=player*2.
 | 3.2 Subsequent-Use Format | Complete | 7-bit method index, fully decoded |
 | 3.2.1 Method Index Derivation | Complete | Formula: `(RID - 1 - iface_count) × 4` |
 | 3.3 First-Use Format | Complete | Huffman method hash, length indicator |
-| 3.3.1 Internal Metadata | Complete | `method_tag` (4 bits) = `method_index & 0x0F`; load-bearing, not cosmetic (see Known Issues) |
+| 3.3.1 Internal Metadata | Complete | `method_tag` (4 bits): empirically opaque, not derivable from `method_index` or any static property; load-bearing, not cosmetic (see Known Issues) |
 | 3.3.2 Method Identifier Derivation | Complete | Huffman encoding algorithm fully reproduced |
 | 3.4 RPCMode Values | Complete | 6 modes, Player has +1 target bit |
 | 3.5 Parameter Encoding | Complete | All 8 param types implemented |
@@ -47,12 +47,16 @@ viewid_stride=50, constant_2=2, block_start=player*2-1, block_end=player*2.
 | 3.7 Huffman String Encoding | Complete | RakNet StringCompressor reproduced |
 
 **Known unknowns:**
-- `method_tag` (4 bits in first-use metadata): derivation is known
-  (`method_index & 0x0F`), but the exact mechanism by which a real Unity
-  client uses the tag for dispatch is not confirmed. distance-server's
-  dispatch-matrix testing showed two RPC methods sharing a tag causing a
-  real Unity client to silently misdispatch first-use RPCs between them —
-  this is **not** cosmetic. See Known Issue #1 below.
+- `method_tag` (4 bits in first-use metadata): **not** a formula —
+  empirically disproven for `method_index & 0x0F` on 12 of 13 tested
+  methods (see `docs/research/2026-07-12-method-tag-real-derivation.md`).
+  Must be captured per-assembly from a real Unity-to-Unity pcap. The
+  exact mechanism by which a real Unity client assigns/uses the tag for
+  dispatch is not confirmed. distance-server's dispatch-matrix testing
+  showed two RPC methods sharing a tag causing a real Unity client to
+  silently misdispatch first-use RPCs between them, and our own testing
+  showed a wrong tag can also cause outright rejection — this is **not**
+  cosmetic. See Known Issue #1 below.
 
 ### §4 State Sync Wire Format — COMPLETE
 
@@ -146,7 +150,7 @@ are not fully understood. None of these block Distance integration.
 | §2.3 (0x81) | fields 2–7 | All decoded (M10a): constants 1,0 + player_index + stride + constants 2 + block_start/end |
 | §1.4 | split packet reassembly | Tested up to 10KB payloads (M10c) |
 | §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
-| §3.3.1 | method_tag | Derivation confirmed (`method_index & 0x0F`); confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing — see Known Issue #1 |
+| §3.3.1 | method_tag | Derivation is **not** a formula — `method_index & 0x0F` empirically disproven for 12 of 13 tested methods (2026-07-12); must be captured per-assembly from a real pcap. Confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing and our own single-variable capture test — see Known Issue #1 |
 
 ---
 
@@ -154,29 +158,45 @@ are not fully understood. None of these block Distance integration.
 
 Problems discovered during implementation that are worked around but not fully resolved.
 
-### 1. First-use RPC metadata (method_tag) — collisions cause silent misdispatch
+### 1. First-use RPC metadata (method_tag) — not derivable, collisions cause silent misdispatch or rejection
 
-`method_tag = method_index & 0x0F` is derived correctly whenever a method's
-real index is registered via `registerMethodIndices`/`learnMethodIndex`. The
-risk is not the derivation — it's that the 4-bit tag space only has 4
-values (0, 4, 8, C), so any two methods can legitimately share a tag. Per
-distance-server's dispatch-matrix testing, a real Unity client can silently
-misdispatch a first-use RPC to a different method that shares its tag
-(observed: `RPC_BROADCAST_ALL` and `RPC_TARGETED` both tag 8, causing
+**Erratum (2026-07-12):** the paragraph originally here claimed
+`method_tag = method_index & 0x0F` was a correct derivation and that the
+only remaining risk was tag-space collisions between correctly-derived
+tags. That premise is empirically disproven — the formula produces the
+wrong tag for 12 of the 13 Loader test RPC methods (see
+`docs/research/2026-07-12-method-tag-real-derivation.md`). `method_tag` is
+not a function of `method_index`, method name, signature, or RID; it must
+be captured empirically from a real Unity-to-Unity pcap per compiled
+assembly.
+
+The risk is not only collisions between correctly-derived tags (as
+originally framed) — it's that there is no correct derivation at all.
+Per distance-server's dispatch-matrix testing, a real Unity client can
+silently misdispatch a first-use RPC to a different method that shares its
+tag (observed: `RPC_BROADCAST_ALL` and `RPC_TARGETED` both tag 8, causing
 `RPC_BROADCAST_ALL` sends to route to `ReceiveTargetedEventServerToClient`
-instead). The exact caching mechanism on the Unity side is not confirmed.
+instead). Our own single-variable capture test found that a wrong tag can
+also cause outright rejection (`Internal RPC error. Invalid RPC index,
+function not registered.`) rather than misdispatch. The exact caching/slot
+mechanism on the Unity side is not confirmed in either case.
 
-The library no longer allows registering a tag independent of a real
-method_index (`registerMethodTag`/`registerMethodTags` were removed —
-see `docs/plans/method-tag-collision-guard.md`), which closes off the
-observed failure mode: a hand-picked tag with no matching index, which both
-guesses wrong and permanently pins the method to first-use encoding. The
-library also warns when a method is sent first-use more than once to the
-same peer, which is the runtime symptom of an unregistered index.
-**Workaround:** always register real method indices (via
-`scripts/extract-method-indices.sh` against the game's Assembly-CSharp.dll)
-for every RPC method that will be sent to a real Unity client, rather than
-relying on the first-use path at all.
+`registerMethodTag`/`registerMethodTags` — removed by
+`docs/plans/method-tag-collision-guard.md` on the (now-disproven) reasoning
+that a correct tag could always be derived from a registered index — have
+been reinstated by `docs/plans/method-tag-real-derivation-fix.md`. They are
+now the *only* correct way to supply a tag for a game-specific method not
+already in the hardcoded Loader-assembly ground-truth table. The library
+still warns when a method is sent first-use more than once to the same
+peer, which remains valid and unaffected by this correction — that
+mechanism doesn't depend on the tag formula being right, only on whether an
+index was ever learned.
+**Workaround:** register real captured tags via `registerMethodTag`/
+`registerMethodTags` (Python: `register_method_tag`/`register_method_tags`)
+for any game-specific method that will be sent first-use to a real Unity
+client. Registering the method's index alone (via
+`scripts/extract-method-indices.sh`) is necessary for subsequent-use
+encoding but does **not** supply a correct tag — the two are independent.
 
 ### 2. Scene-baked ViewID numbering is fragile
 

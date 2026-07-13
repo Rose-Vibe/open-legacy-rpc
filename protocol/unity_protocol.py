@@ -105,6 +105,17 @@ def lookup_method_by_hash(hash_hex):
 
 METHOD_INDEX_MAP = {}
 INDEX_TO_METHOD = {}
+METHOD_TAG_MAP = {}
+_tag_fallback_warned = set()
+
+
+def _reset_tag_fallback_warnings():
+    """Clear the one-time-per-method-name tag-fallback warning tracker.
+
+    Tests asserting the fallback warning fires must call this in their own
+    setup — it is not reset automatically between calls.
+    """
+    _tag_fallback_warned.clear()
 
 
 def compute_method_index(method_rid, interface_method_count=0):
@@ -161,8 +172,25 @@ def register_method_indices(indices):
     for name, idx in indices.items():
         METHOD_INDEX_MAP[name] = idx
         INDEX_TO_METHOD[idx] = name
-        METHOD_TAG_MAP[name] = idx & 0x0F
     register_method_names(list(indices.keys()))
+
+
+def register_method_tag(name, tag):
+    """Register the real method_tag captured from a Unity-to-Unity pcap.
+
+    method_tag cannot be derived from method_index, method name, or
+    signature — no closed-form formula fits the known ground-truth data
+    (see docs/research/2026-07-12-method-tag-real-derivation.md). It must
+    be captured empirically for each compiled assembly whose RPCs will be
+    sent first-use to a real Unity client, then registered here.
+    """
+    METHOD_TAG_MAP[name] = tag
+
+
+def register_method_tags(tags):
+    """Register real method_tags for multiple methods. See register_method_tag."""
+    for name, tag in tags.items():
+        METHOD_TAG_MAP[name] = tag
 
 
 INTERNAL_RPC_CONSTANT = 0x0000
@@ -185,6 +213,29 @@ METHOD_SIGNATURES = {
     'RPC_Gamma': ['int'],
     'RPC_NetworkViewID': ['NetworkViewID'],
     'RPC_NetworkPlayer': ['NetworkPlayer'],
+}
+
+
+# method_tag has no closed-form derivation from method_index, name, RID, or
+# signature (see docs/research/2026-07-12-method-tag-real-derivation.md) — it
+# must be captured empirically from a real Unity-to-Unity pcap per compiled
+# assembly. These are the 13 real values captured for the Loader test
+# assembly; other assemblies need their own captures registered via
+# register_method_tag(s).
+_LOADER_REAL_TAGS = {
+    'RPC_Void': 0,
+    'RPC_Int': 8,
+    'RPC_Float': 12,
+    'RPC_String': 0,
+    'RPC_Vector3': 8,
+    'RPC_Quaternion': 8,
+    'RPC_Bytes': 12,
+    'RPC_IntFloatString': 8,
+    'RPC_NetworkPlayer': 4,
+    'RPC_NetworkViewID': 8,
+    'RPC_Alpha': 4,
+    'RPC_Beta': 4,
+    'RPC_Gamma': 4,
 }
 
 
@@ -223,20 +274,13 @@ def _register_loader_assembly():
         idx = compute_method_index(rid, _INTERFACE_METHODS)
         METHOD_INDEX_MAP[name] = idx
         INDEX_TO_METHOD[idx] = name
+    for name, tag in _LOADER_REAL_TAGS.items():
+        METHOD_TAG_MAP[name] = tag
     register_method_names(METHOD_SIGNATURES.keys())
     register_method_names(INTERNAL_RPCS)
 
 
 _register_loader_assembly()
-
-METHOD_TAG_MAP = {}
-for _name, _idx in METHOD_INDEX_MAP.items():
-    METHOD_TAG_MAP[_name] = _idx & 0x0F
-
-
-def compute_method_tag(method_index):
-    """Compute method_tag from method_index: bottom 4 bits."""
-    return method_index & 0x0F
 
 
 def encode_view_id(view_id):
@@ -396,7 +440,17 @@ def encode_rpc_first_use(method_name, params, view_id=1, timestamp_ms=0,
     bs.write_bytes(method_hash)
     # 52-bit internal metadata: method_tag(4) + zeros(16) + remaining_count(16) + constant(16)
     remaining_count = param_bits + 19 + target_bits + relay_bits
-    method_tag = METHOD_TAG_MAP.get(method_name, 0)
+    method_tag = METHOD_TAG_MAP.get(method_name)
+    if method_tag is None:
+        if method_name not in _tag_fallback_warned:
+            _tag_fallback_warned.add(method_name)
+            log.warning(
+                "No captured method_tag registered for %r — falling back to "
+                "tag 0. This is a guess, not a derivation; if this method is "
+                "sent first-use to a real Unity client, capture its real tag "
+                "from a pcap and register it with register_method_tag().",
+                method_name)
+        method_tag = 0
     bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
     bs.write_u16_be(remaining_count)
