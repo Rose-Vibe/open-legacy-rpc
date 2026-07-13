@@ -1,10 +1,14 @@
-# Unity Legacy Networking Reversed
+# open-legacy-rpc
 
 Reverse-engineered wire format spec and implementations (Python + TypeScript)
 of Unity's legacy RPC networking stack (`NetworkView` / `[RPC]` /
 `OnSerializeNetworkView`), last supported in Unity 2018.1.6f1. The transport
 layer is RakNet 3.731; this project documents and implements **Unity's
 undocumented framing on top of RakNet**.
+
+Unity is a trademark of Unity Technologies. This project is independent,
+clean-room reverse-engineered, and not affiliated with or endorsed by Unity
+Technologies.
 
 ## Repository Structure
 
@@ -51,7 +55,7 @@ npm test
 ### TypeScript Server
 
 ```typescript
-import { UnityServer, createUdpSocket } from 'unity-legacy-networking';
+import { UnityServer, createUdpSocket } from 'open-legacy-rpc';
 
 const socket = createUdpSocket();
 const server = new UnityServer(socket, { port: 7777 });

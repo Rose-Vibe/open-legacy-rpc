@@ -1,4 +1,4 @@
-# Unity Legacy Networking Reversed
+# open-legacy-rpc
 
 Reverse-engineering Unity's legacy RPC networking (`NetworkView` / `[RPC]` /
 `OnSerializeNetworkView`) — the stack last supported in Unity 2018.1.6f1.
