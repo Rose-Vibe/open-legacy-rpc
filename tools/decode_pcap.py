@@ -19,6 +19,7 @@ from protocol.raknet import parse_datagram, Reliability, is_offline_message
 from protocol.unity_protocol import (
     decode_rpc, decode_batch_index, decode_state_sync, is_rpc,
     MSG_ID_RPC, MSG_ID_BATCH_INDEX, METHOD_SIGNATURES, RPCMode,
+    compute_method_tag,
 )
 from protocol.master_serialization import (
     ID_DATABASE_QUERY_REQUEST, ID_DATABASE_UPDATE_ROW, ID_DATABASE_REMOVE_ROW,
@@ -200,6 +201,13 @@ def decode_rpc_layer(payload, bit_length, config):
             result['classGuid'] = decoded['class_guid']
         if 'method_hash' in decoded:
             result['methodHash'] = decoded['method_hash']
+        method_tag = decoded.get('method_tag')
+        if method_tag is not None:
+            result['methodTag'] = method_tag
+            if method_name:
+                expected_tag = compute_method_tag(method_name)
+                result['methodTagExpected'] = expected_tag
+                result['methodTagMatch'] = (method_tag == expected_tag)
     else:
         method_idx = decoded.get('method_index')
         if method_idx is not None:

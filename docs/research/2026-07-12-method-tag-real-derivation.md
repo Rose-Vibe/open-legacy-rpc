@@ -125,20 +125,45 @@ standalone `mcs` compile + `monodis` inspection before applying the fix.
 ## What This Means
 
 - `method_tag` cannot be derived from `method_index`, or from any other
-  static property of the method (name, signature, RID) tested so far.
+  whole-assembly compiled property of the method (signature, RID) tested
+  so far.
 - The only 4 values ever observed across 13 methods are 0, 4, 8, 12 — always
   a multiple of 4 — suggesting some kind of small internal slot table, but
   the *assignment* of a specific method to a specific slot is opaque from
   outside Unity's runtime. This is a hypothesis, not confirmed.
-- The tag must be captured empirically from a real Unity-to-Unity pcap for
-  each compiled assembly whose RPCs will be sent to a real Unity client.
-  It is not something `scripts/extract-method-indices.cs` (static IL
-  metadata inspection) can produce correctly, despite currently trying to
-  (`int tag = index & 0x0F;`).
 - This directly contradicts `docs/plans/method-tag-collision-guard.md`'s
-  premise, which treated the formula as settled fact and removed the only
-  API (`register_method_tag(s)`) that could set a tag independent of index.
-  See `docs/plans/method-tag-real-derivation-fix.md` for the corrective plan.
+  premise, which treated the `method_index & 0x0F` formula as settled fact
+  and removed the only API (`register_method_tag(s)`) that could set a tag
+  independent of index. See `docs/plans/method-tag-real-derivation-fix.md`
+  for the corrective plan.
+
+**Update, 2026-07-12 (later the same day) / 2026-07-13:** the paragraph
+above originally continued by concluding the tag "must be captured
+empirically from a real Unity-to-Unity pcap for each compiled assembly" —
+i.e. that it's an opaque per-build constant with nothing more to say about
+it, the same way `method_index` is. **That conclusion was wrong**, and is
+kept struck-through-in-spirit here rather than deleted, as the record of a
+resting point that didn't hold up. `method_tag`'s upper 2 bits turned out
+to be spillover from the *same* Huffman/StringCompressor bitstream
+`compute_method_id` builds for the method hash: continue the bitstream
+past the byte-aligned cap that truncates the hash (padding with repeats of
+`codes[0]`, the same pad source `compute_method_id` itself uses) and the
+next 2 bits, shifted into the tag's high bits, are the real tag — a
+name-only derivation with no dependency on signature, RID, or compile
+order. This reproduces all 13 ground-truth values above exactly, plus 2/2
+out-of-sample (`BaseRpc`→4, `DerivedRpc`→12) and 11/11 blind predictions
+against a fresh capture. See
+`docs/plans/method-tag-shared-derivation-hypotheses.md` for the full
+derivation and validation, and `compute_method_tag()`
+(`protocol/unity_protocol.py`) / `computeMethodTag()`
+(`ts/src/unity/method-hash.ts`) for the implementation now used by
+`encode_rpc_first_use`/`encodeRpcFirstUse` as the default (with
+`register_method_tag(s)`/`registerMethodTag(s)` kept as an explicit,
+logged-on-divergence override for the rare case a specific compiled
+assembly needs one — not as the primary mechanism). The
+per-build-empirical-capture requirement remains genuinely true for
+`method_index`; it was never true for `method_tag`, this document's
+original conclusion notwithstanding.
 
 ## Related Files
 

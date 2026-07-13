@@ -7,6 +7,7 @@ import {
   lookupMethodByHash,
   registerMethodNames,
   computeMethodIndex,
+  computeMethodTag,
 } from './method-hash.js';
 
 export const enum RpcMode {
@@ -77,25 +78,27 @@ export const METHOD_SIGNATURES: Record<string, ParamType[]> = {
 const METHOD_INDEX_MAP = new Map<string, number>();
 const INDEX_TO_METHOD = new Map<number, string>();
 const METHOD_TAG_MAP = new Map<string, number>();
-const tagFallbackWarned = new Set<string>();
+const tagMismatchWarned = new Set<string>();
 
 /**
- * Clear the one-time-per-method-name tag-fallback warning tracker.
- * Tests asserting the fallback warning fires must call this in their own
+ * Clear the one-time-per-method-name tag-mismatch warning tracker.
+ * Tests asserting the mismatch warning fires must call this in their own
  * setup — it is not reset automatically between calls.
  */
-export function resetTagFallbackWarnings(): void {
-  tagFallbackWarned.clear();
+export function resetTagMismatchWarnings(): void {
+  tagMismatchWarned.clear();
 }
 
 /**
- * Register the real method_tag captured from a Unity-to-Unity pcap.
+ * Register an explicit method_tag override for a method name.
  *
- * method_tag cannot be derived from method_index, method name, or
- * signature — no closed-form formula fits the known ground-truth data
- * (see docs/research/2026-07-12-method-tag-real-derivation.md). It must
- * be captured empirically for each compiled assembly whose RPCs will be
- * sent first-use to a real Unity client, then registered here.
+ * method_tag defaults to computeMethodTag(name) — derived from the method
+ * name alone (see docs/research/2026-07-12-method-tag-real-derivation.md
+ * and docs/plans/method-tag-shared-derivation-hypotheses.md). An override
+ * should only be needed if a specific compiled assembly is somehow found
+ * to diverge from the computed value; encodeRpcFirstUse logs a warning if
+ * a registered override disagrees with the computed default, since that
+ * would indicate either a bad override or a gap in the derivation.
  */
 export function registerMethodTag(methodName: string, tag: number): void {
   METHOD_TAG_MAP.set(methodName, tag);
@@ -108,27 +111,12 @@ export function registerMethodTags(tags: Record<string, number>): void {
   }
 }
 
-// method_tag has no closed-form derivation from method_index, name, RID, or
-// signature (see docs/research/2026-07-12-method-tag-real-derivation.md) — it
-// must be captured empirically from a real Unity-to-Unity pcap per compiled
-// assembly. These are the 13 real values captured for the Loader test
-// assembly; other assemblies need their own captures registered via
-// registerMethodTag(s).
-const LOADER_REAL_TAGS: Record<string, number> = {
-  RPC_Void: 0,
-  RPC_Int: 8,
-  RPC_Float: 12,
-  RPC_String: 0,
-  RPC_Vector3: 8,
-  RPC_Quaternion: 8,
-  RPC_Bytes: 12,
-  RPC_IntFloatString: 8,
-  RPC_NetworkPlayer: 4,
-  RPC_NetworkViewID: 8,
-  RPC_Alpha: 4,
-  RPC_Beta: 4,
-  RPC_Gamma: 4,
-};
+// The 13 real method_tag values captured for the Loader test assembly from a
+// Unity-to-Unity pcap are pinned as a ground-truth fixture in
+// test/unity-protocol.test.ts (computeMethodTag reproduces all 13 from the
+// name alone — see docs/research/2026-07-12-method-tag-real-derivation.md
+// and docs/plans/method-tag-shared-derivation-hypotheses.md).
+// encodeRpcFirstUse no longer needs a per-assembly capture registered here.
 
 function registerLoaderAssembly(): void {
   const INTERFACE_METHODS = 7;
@@ -151,9 +139,6 @@ function registerLoaderAssembly(): void {
     const idx = computeMethodIndex(rid, INTERFACE_METHODS);
     METHOD_INDEX_MAP.set(name, idx);
     INDEX_TO_METHOD.set(idx, name);
-  }
-  for (const [name, tag] of Object.entries(LOADER_REAL_TAGS)) {
-    METHOD_TAG_MAP.set(name, tag);
   }
   registerMethodNames(Object.keys(METHOD_SIGNATURES));
   registerMethodNames([...INTERNAL_RPCS]);
@@ -290,17 +275,19 @@ export function encodeRpcFirstUse(opts: RpcEncodeOptions): {
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
   const remainingCount = paramBits + 19 + targetBits + relayBits;
-  let methodTag = METHOD_TAG_MAP.get(opts.methodName);
-  if (methodTag === undefined) {
-    if (!tagFallbackWarned.has(opts.methodName)) {
-      tagFallbackWarned.add(opts.methodName);
+  let methodTag = computeMethodTag(opts.methodName);
+  const tagOverride = METHOD_TAG_MAP.get(opts.methodName);
+  if (tagOverride !== undefined) {
+    if (tagOverride !== methodTag && !tagMismatchWarned.has(opts.methodName)) {
+      tagMismatchWarned.add(opts.methodName);
       console.warn(
-        `No captured method_tag registered for '${opts.methodName}' — falling back to ` +
-        `tag 0. This is a guess, not a derivation; if this method is sent first-use to a ` +
-        `real Unity client, capture its real tag from a pcap and register it with registerMethodTag().`
+        `Registered method_tag override for '${opts.methodName}' (${String(tagOverride)}) diverges ` +
+        `from computeMethodTag's derived value (${String(methodTag)}) — using the override, but this ` +
+        `indicates either a bad override or a gap in the derivation (see ` +
+        `docs/research/2026-07-12-method-tag-real-derivation.md).`
       );
     }
-    methodTag = 0;
+    methodTag = tagOverride;
   }
   bs.writeBits(methodTag, 4);
   bs.writeBits(0, 16);

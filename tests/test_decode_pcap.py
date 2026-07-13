@@ -11,6 +11,7 @@ from protocol.raknet import Reliability
 from protocol.unity_protocol import (
     encode_rpc_first_use, encode_rpc_subsequent, encode_batch_index,
     encode_state_sync, RPCMode, MSG_ID_RPC, MSG_ID_BATCH_INDEX,
+    compute_method_tag, register_method_tag, METHOD_TAG_MAP,
 )
 from protocol.bitstream import BitStream
 from tools.decode_pcap import (
@@ -168,6 +169,26 @@ def test_rpc_first_use_decode():
     assert 'classGuid' in result
     assert 'methodHash' in result
     assert result['targetView'] == 0x2000
+    assert result['methodTag'] == compute_method_tag('RPC_Int')
+    assert result['methodTagExpected'] == compute_method_tag('RPC_Int')
+    assert result['methodTagMatch'] is True
+
+
+def test_rpc_first_use_decode_tag_mismatch():
+    """A diverging registered override surfaces as a mismatch, not silently."""
+    saved_tag = dict(METHOD_TAG_MAP)
+    try:
+        register_method_tag('RPC_Int', compute_method_tag('RPC_Int') ^ 0x4)
+        data, bits = encode_rpc_first_use(
+            'RPC_Int', [42], view_id=1, timestamp_ms=0, mode=RPCMode.Server,
+            target_view=0x2000)
+        result = decode_unity(data, bits, {})
+        assert result['methodTag'] == METHOD_TAG_MAP['RPC_Int']
+        assert result['methodTagExpected'] == compute_method_tag('RPC_Int')
+        assert result['methodTagMatch'] is False
+    finally:
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
 
 
 def test_rpc_subsequent_decode():

@@ -1,0 +1,12 @@
+name,ident_hex,predicted_tag,observed_tag,boundary_case,r,match
+RPC_J,0c93b276d5b1ab75,4,4,PAD,6,true
+RPC_A,0c93b276d5b154,4,4,EXACT,2,true
+BaseRpc,2a0db0645285,4,4,SHORT,6,true
+RPC_D,0c93b276d5b133,8,8,TRUNC,1,true
+RPC_Q,0c93b276d5b155da,8,8,PAD,5,true
+RPC_B,0c93b276d5b1a8,0,0,TRUNC,1,true
+RPC_M,0c93b276d5b17d,12,12,TRUNC,0,true
+RPC_I,0c93b276d5b1d4,8,8,PAD,3,true
+RPC_C,0c93b276d5b19daa,12,12,PAD,7,true
+RPC_K,0c93b276d5b1ab65,4,4,PAD,4,true
+RPC_IC,0c93b276d5b1d53b,4,4,TRUNC,0,true

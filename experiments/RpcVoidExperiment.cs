@@ -37,7 +37,10 @@ public class RpcVoidExperiment : IExperiment
         if (sentTime > 0 && Time.realtimeSinceStartup - sentTime > 0.5f)
         {
             ctx.Log("Sending RPC_Void to server");
-            ctx.PrimaryNetworkView.RPC("RPC_Void", RPCMode.Server);
+            // Explicit empty array (not a params-expansion call) avoids mcs
+            // compiling the zero-length array to Array.Empty<object>(),
+            // which the target mscorlib lacks. See LargeDeltaIndexExperiment.cs.
+            ctx.PrimaryNetworkView.RPC("RPC_Void", RPCMode.Server, new object[0]);
             sent = true;
             sentTime = Time.realtimeSinceStartup;
         }

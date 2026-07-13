@@ -12,14 +12,13 @@
 //
 // Output: JSON array of {name, rid, interfaceMethodsBefore, index} objects.
 //
-// This does NOT emit method_tag. method_tag is not derivable from static IL
-// metadata (RID, index, name, or signature) — no closed-form formula fits
-// the known ground truth (see
-// docs/research/2026-07-12-method-tag-real-derivation.md). It must be
-// captured empirically from a real Unity-to-Unity pcap of this specific
-// compiled assembly, decoded per
-// docs/notes/unity-raknet-capture-decode-playbook.md, and registered via
-// registerMethodTag(s) — not computed from this tool's output.
+// This does NOT emit method_tag. Unlike method_index, method_tag is derived
+// from the method name alone (a shared Huffman-bitstream rule confirmed in
+// docs/research/2026-07-12-method-tag-real-derivation.md and
+// docs/plans/method-tag-shared-derivation-hypotheses.md), so it's computed
+// at runtime by compute_method_tag()/computeMethodTag() in the Python/TS
+// implementations, not by this tool. Porting the rule here would just be a
+// second implementation to keep in sync with no consumer.
 
 using System;
 using System.Collections.Generic;

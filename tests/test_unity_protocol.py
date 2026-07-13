@@ -1,5 +1,7 @@
+import json
 import struct
 import sys
+from pathlib import Path
 
 from protocol.unity_protocol import (
     RPCMode, encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
@@ -13,7 +15,7 @@ from protocol.unity_protocol import (
     encode_instantiate_params, decode_instantiate_params,
     METHOD_TAG_MAP, register_method_indices,
     register_method_tag, register_method_tags,
-    _reset_tag_fallback_warnings,
+    compute_method_tag, _reset_tag_mismatch_warnings,
     encode_batch_index, decode_batch_index, MSG_ID_BATCH_INDEX,
 )
 from protocol.bitstream import BitStream
@@ -704,12 +706,19 @@ def test_decode_rpc_index_overrides_take_priority_over_global_static_table():
         INDEX_TO_METHOD.update(saved_reverse)
 
 
-def test_method_tag_defaults_to_zero(caplog):
-    """Unregistered methods use method_tag=0 and log a one-time warning."""
+def test_method_tag_defaults_to_computed_value(caplog):
+    """Unregistered methods use compute_method_tag(name), with no warning.
+
+    method_tag is no longer an opaque per-build capture (see
+    docs/research/2026-07-12-method-tag-real-derivation.md and
+    docs/plans/method-tag-shared-derivation-hypotheses.md) — it's derived
+    from the method name alone, so there is nothing to "fall back" to and
+    nothing to warn about when a name has no explicit override.
+    """
     saved_tag = dict(METHOD_TAG_MAP)
     try:
         METHOD_TAG_MAP.pop('RPC_Int', None)
-        _reset_tag_fallback_warnings()
+        _reset_tag_mismatch_warnings()
         with caplog.at_level('WARNING'):
             payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
         all_bits = ''.join(f'{b:08b}' for b in payload)
@@ -718,10 +727,58 @@ def test_method_tag_defaults_to_zero(caplog):
         hash_extra_bits = method_id_bits - 48
         tag_start = 160 + hash_extra_bits
         tag_bits = all_bits[tag_start:tag_start + 4]
-        assert int(tag_bits, 2) == 0
+        assert int(tag_bits, 2) == compute_method_tag('RPC_Int')
+        assert not any('method_tag' in rec.message for rec in caplog.records), \
+            "Expected no warning when no explicit override is registered"
+    finally:
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
+
+
+def test_method_tag_override_mismatch_warns(caplog):
+    """A registered override that disagrees with compute_method_tag warns,
+    but the override still wins on the wire."""
+    saved_tag = dict(METHOD_TAG_MAP)
+    try:
+        _reset_tag_mismatch_warnings()
+        register_method_tag('RPC_Int', compute_method_tag('RPC_Int') ^ 0x4)
+        with caplog.at_level('WARNING'):
+            payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
+        all_bits = ''.join(f'{b:08b}' for b in payload)
+        guid, hash_val = compute_method_id('RPC_Int')
+        method_id_bits = (len(guid) + len(hash_val)) * 8
+        hash_extra_bits = method_id_bits - 48
+        tag_start = 160 + hash_extra_bits
+        tag_bits = all_bits[tag_start:tag_start + 4]
+        assert int(tag_bits, 2) == METHOD_TAG_MAP['RPC_Int'], \
+            "Override must still win on the wire despite the mismatch"
         assert any('RPC_Int' in rec.message and 'method_tag' in rec.message
                    for rec in caplog.records), \
-            "Expected a fallback warning mentioning the method name and method_tag"
+            "Expected a mismatch warning mentioning the method name and method_tag"
+    finally:
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
+
+
+def test_method_tag_override_matching_computed_value_does_not_warn(caplog):
+    """A registered override that agrees with compute_method_tag is a no-op
+    on the wire and never warns."""
+    saved_tag = dict(METHOD_TAG_MAP)
+    try:
+        _reset_tag_mismatch_warnings()
+        register_method_tag('RPC_Int', compute_method_tag('RPC_Int'))
+        with caplog.at_level('WARNING'):
+            payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
+        all_bits = ''.join(f'{b:08b}' for b in payload)
+        guid, hash_val = compute_method_id('RPC_Int')
+        method_id_bits = (len(guid) + len(hash_val)) * 8
+        hash_extra_bits = method_id_bits - 48
+        tag_start = 160 + hash_extra_bits
+        tag_bits = all_bits[tag_start:tag_start + 4]
+        assert int(tag_bits, 2) == compute_method_tag('RPC_Int')
+        assert not any('RPC_Int' in rec.message and 'method_tag' in rec.message
+                       for rec in caplog.records), \
+            "A matching override should never emit a mismatch warning"
     finally:
         METHOD_TAG_MAP.clear()
         METHOD_TAG_MAP.update(saved_tag)
@@ -740,30 +797,28 @@ def test_register_method_tags_bulk():
 
 
 def test_loader_assembly_tags_match_ground_truth():
-    """The 13 built-in Loader methods' tags match the captured ground truth.
+    """compute_method_tag reproduces every real tag captured from
+    Unity-to-Unity pcaps in the shared cross-language conformance fixture
+    (13 Loader assembly methods + the Phase 1 blind-prediction set +
+    BaseRpc/DerivedRpc). ts/test/unity-protocol.test.ts loads the same
+    fixture, so the two encoders can't silently drift apart.
 
     Regression test against silently reintroducing the disproven
-    `method_index & 0x0F` formula. See
+    `method_index & 0x0F` formula, and against compute_method_tag drifting
+    from the ground truth. See
     docs/research/2026-07-12-method-tag-real-derivation.md.
     """
-    expected = {
-        'RPC_Void': 0,
-        'RPC_Int': 8,
-        'RPC_Float': 12,
-        'RPC_String': 0,
-        'RPC_Vector3': 8,
-        'RPC_Quaternion': 8,
-        'RPC_Bytes': 12,
-        'RPC_IntFloatString': 8,
-        'RPC_NetworkPlayer': 4,
-        'RPC_NetworkViewID': 8,
-        'RPC_Alpha': 4,
-        'RPC_Beta': 4,
-        'RPC_Gamma': 4,
-    }
-    for name, tag in expected.items():
-        assert METHOD_TAG_MAP[name] == tag, \
-            f"{name}: expected tag={tag}, got {METHOD_TAG_MAP.get(name)}"
+    fixture_path = (Path(__file__).parent.parent / 'docs' / 'research'
+                    / 'fixtures' / 'method-tag-conformance.json')
+    fixture = json.loads(fixture_path.read_text())
+    assert len(fixture['entries']) == 25
+    for entry in fixture['entries']:
+        name, tag = entry['name'], entry['tag']
+        assert compute_method_tag(name) == tag, \
+            f"{name}: expected tag={tag}, got {compute_method_tag(name)}"
+        assert METHOD_TAG_MAP.get(name) is None, \
+            f"{name}: METHOD_TAG_MAP should have no override by default, " \
+            f"got {METHOD_TAG_MAP.get(name)}"
 
 
 def test_u64_timestamp_high_values():

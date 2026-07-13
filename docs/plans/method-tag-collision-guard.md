@@ -16,6 +16,17 @@ the tag formula being right, only on whether an index was ever learned.
 The historical body below is left as-is; it accurately records what was
 believed and done at the time.
 
+**Second erratum (2026-07-13):** "captured from a real pcap" above was
+also later found to be unnecessary. `method_tag` turned out to be
+derivable from the method name alone (spillover bits from the same
+Huffman bitstream as `method_hash` — see
+`docs/research/2026-07-12-method-tag-real-derivation.md`'s 2026-07-13
+update and `docs/plans/method-tag-shared-derivation-hypotheses.md`).
+`register_method_tag(s)`/`registerMethodTag(s)` remain in the codebase,
+but now as an override consulted only when it diverges from
+`compute_method_tag`/`computeMethodTag`'s computed default — not as the
+primary way to supply a tag.
+
 ## Context
 
 `docs/research/unity-legacy-networking-wire-format.md` §3.3.1 documents

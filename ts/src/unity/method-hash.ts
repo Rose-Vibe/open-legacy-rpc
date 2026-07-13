@@ -49,6 +49,40 @@ export function computeMethodId(methodName: string): {
   };
 }
 
+/**
+ * Compute the first-use method_tag from the method name alone.
+ *
+ * method_tag's upper 2 bits are spillover from the same Huffman bitstream
+ * computeMethodId builds: continue padding that stream with repeats of
+ * codes[0] (the same pad source computeMethodId itself uses) past the byte
+ * boundary and read the next 2 bits, shifted into the tag's high bits. See
+ * docs/research/2026-07-12-method-tag-real-derivation.md and
+ * docs/plans/method-tag-shared-derivation-hypotheses.md for the derivation
+ * and validation (13/13 ground truth, 2/2 out-of-sample, 155-frame sweep,
+ * 11/11 blind prediction).
+ */
+export function computeMethodTag(methodName: string): number {
+  if (!methodName) {
+    throw new Error('methodName must be non-empty');
+  }
+  const codes = getCodes();
+  let huffmanBits = '';
+  for (let i = 0; i < methodName.length; i++) {
+    const code = codes.get(methodName.charCodeAt(i));
+    if (code) huffmanBits += code;
+  }
+  const n = huffmanBits.length;
+  const cap = 8 * Math.ceil(n / 8);
+
+  let content = '00' + huffmanBits;
+  const padCode = codes.get(0) ?? '';
+  while (content.length < cap + 2) {
+    content += padCode;
+  }
+
+  return parseInt(content.slice(cap, cap + 2), 2) << 2;
+}
+
 const methodIdCache = new Map<string, { classGuid: Uint8Array; methodHash: Uint8Array }>();
 
 export function getMethodId(methodName: string): {

@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
-import { computeMethodId, computeMethodIndex, registerMethodNames } from '../src/unity/method-hash.js';
+import { computeMethodId, computeMethodIndex, computeMethodTag, registerMethodNames } from '../src/unity/method-hash.js';
 import { encodeViewId16, decodeViewId16, encodeViewId, decodeViewIdBits } from '../src/unity/view-id.js';
 import { BitStream } from '../src/bitstream.js';
 import { decodeQueryReply, encodeQueryReply } from '../src/master/serialization.js';
@@ -12,7 +15,7 @@ import {
   registerMethodIndices,
   registerMethodTag,
   registerMethodTags,
-  resetTagFallbackWarnings,
+  resetTagMismatchWarnings,
   hasMethodIndex,
   encodeBatchIndex,
   decodeBatchIndex,
@@ -636,25 +639,24 @@ function extractFirstUseTag(data: Uint8Array, bitLength: number): number {
   return bs.readBits(4);
 }
 
-describe('method_tag registration', () => {
-  const LOADER_REAL_TAGS: Record<string, number> = {
-    RPC_Void: 0,
-    RPC_Int: 8,
-    RPC_Float: 12,
-    RPC_String: 0,
-    RPC_Vector3: 8,
-    RPC_Quaternion: 8,
-    RPC_Bytes: 12,
-    RPC_IntFloatString: 8,
-    RPC_NetworkPlayer: 4,
-    RPC_NetworkViewID: 8,
-    RPC_Alpha: 4,
-    RPC_Beta: 4,
-    RPC_Gamma: 4,
-  };
+// Shared with tests/test_unity_protocol.py (Python) so the two encoders
+// can't silently drift apart — see
+// docs/research/fixtures/method-tag-conformance.json.
+const FIXTURE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..', '..', 'docs', 'research', 'fixtures', 'method-tag-conformance.json',
+);
+interface MethodTagFixture {
+  entries: { name: string; tag: number }[];
+}
+const METHOD_TAG_FIXTURE = JSON.parse(
+  readFileSync(FIXTURE_PATH, 'utf8'),
+) as MethodTagFixture;
 
+describe('method_tag registration', () => {
   it('built-in Loader assembly tags match the ground-truth capture', () => {
-    for (const [name, tag] of Object.entries(LOADER_REAL_TAGS)) {
+    expect(METHOD_TAG_FIXTURE.entries.length).toBe(25);
+    for (const { name, tag } of METHOD_TAG_FIXTURE.entries) {
       const encoded = encodeRpcFirstUse({
         methodName: name,
         params: [],
@@ -700,15 +702,57 @@ describe('method_tag registration', () => {
     registerMethodIndices({ RPC_IndexOnly: 0xf0 });
     expect(hasMethodIndex('RPC_IndexOnly')).toBe(true);
 
-    resetTagFallbackWarnings();
+    resetTagMismatchWarnings();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const encoded = encodeRpcFirstUse({
         methodName: 'RPC_IndexOnly', params: [], timestampMs: 0,
         mode: RpcMode.Server, targetView: 0x2000,
       });
-      expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(0);
+      expect(extractFirstUseTag(encoded.data, encoded.bitLength))
+        .toBe(computeMethodTag('RPC_IndexOnly'));
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('an override that diverges from computeMethodTag wins on the wire and warns once', () => {
+    resetTagMismatchWarnings();
+    const computed = computeMethodTag('RPC_MismatchTag');
+    registerMethodTag('RPC_MismatchTag', computed ^ 0x4);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const encoded = encodeRpcFirstUse({
+        methodName: 'RPC_MismatchTag', params: [], timestampMs: 0,
+        mode: RpcMode.Server, targetView: 0x2000,
+      });
+      expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(computed ^ 0x4);
       expect(warnSpy).toHaveBeenCalledTimes(1);
+
+      // Second encode: same divergent override, warning is one-time.
+      encodeRpcFirstUse({
+        methodName: 'RPC_MismatchTag', params: [], timestampMs: 0,
+        mode: RpcMode.Server, targetView: 0x2000,
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('an override matching computeMethodTag is a no-op on the wire and never warns', () => {
+    resetTagMismatchWarnings();
+    const computed = computeMethodTag('RPC_MatchingTag');
+    registerMethodTag('RPC_MatchingTag', computed);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const encoded = encodeRpcFirstUse({
+        methodName: 'RPC_MatchingTag', params: [], timestampMs: 0,
+        mode: RpcMode.Server, targetView: 0x2000,
+      });
+      expect(extractFirstUseTag(encoded.data, encoded.bitLength)).toBe(computed);
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }

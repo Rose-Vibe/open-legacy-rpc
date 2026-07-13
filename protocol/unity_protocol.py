@@ -71,6 +71,33 @@ def compute_method_id(method_name):
     return result[:6], result[6:]
 
 
+def compute_method_tag(method_name):
+    """Compute the first-use method_tag from the method name alone.
+
+    method_tag's upper 2 bits are spillover from the same Huffman bitstream
+    compute_method_id builds: continue padding that stream with repeats of
+    codes[0] (the same pad source compute_method_id itself uses) past the
+    byte boundary and read the next 2 bits, shifted into the tag's high
+    bits. See docs/research/2026-07-12-method-tag-real-derivation.md and
+    docs/plans/method-tag-shared-derivation-hypotheses.md for the derivation
+    and validation (13/13 ground truth, 2/2 out-of-sample, 155-frame sweep,
+    11/11 blind prediction).
+    """
+    if not method_name:
+        raise ValueError("method_name must be non-empty")
+    codes = get_codes()
+    huffman_bits = ''.join(codes[ord(c)] for c in method_name)
+    n = len(huffman_bits)
+    cap = 8 * ((n + 7) // 8)
+
+    content = '00' + huffman_bits
+    pad_code = codes[0]
+    while len(content) < cap + 2:
+        content += pad_code
+
+    return int(content[cap:cap + 2], 2) << 2
+
+
 _method_id_cache = {}
 
 
@@ -103,19 +130,33 @@ def lookup_method_by_hash(hash_hex):
             return name
     return None
 
+
+def lookup_method_by_identifier(class_guid_hex, method_hash_hex):
+    """Look up a method name by its full (class_guid + method_hash) identifier.
+
+    Matching on the hash alone is ambiguous when method_hash_hex is empty
+    (identifier fits entirely in the 6-byte class_guid) — multiple distinct
+    short names all have an empty hash, so the full identifier must be
+    compared. Non-empty hashes still go through this path for consistency.
+    """
+    for name, (g, h) in _method_id_cache.items():
+        if g.hex() == class_guid_hex and h.hex() == method_hash_hex:
+            return name
+    return None
+
 METHOD_INDEX_MAP = {}
 INDEX_TO_METHOD = {}
 METHOD_TAG_MAP = {}
-_tag_fallback_warned = set()
+_tag_mismatch_warned = set()
 
 
-def _reset_tag_fallback_warnings():
-    """Clear the one-time-per-method-name tag-fallback warning tracker.
+def _reset_tag_mismatch_warnings():
+    """Clear the one-time-per-method-name tag-mismatch warning tracker.
 
-    Tests asserting the fallback warning fires must call this in their own
+    Tests asserting the mismatch warning fires must call this in their own
     setup — it is not reset automatically between calls.
     """
-    _tag_fallback_warned.clear()
+    _tag_mismatch_warned.clear()
 
 
 def compute_method_index(method_rid, interface_method_count=0):
@@ -178,13 +219,16 @@ def register_method_indices(indices):
 
 
 def register_method_tag(name, tag):
-    """Register the real method_tag captured from a Unity-to-Unity pcap.
+    """Register an explicit method_tag override for a method name.
 
-    method_tag cannot be derived from method_index, method name, or
-    signature — no closed-form formula fits the known ground-truth data
-    (see docs/research/2026-07-12-method-tag-real-derivation.md). It must
-    be captured empirically for each compiled assembly whose RPCs will be
-    sent first-use to a real Unity client, then registered here.
+    method_tag defaults to compute_method_tag(name) — derived from the
+    method name alone (see docs/research/2026-07-12-method-tag-real-
+    derivation.md and docs/plans/method-tag-shared-derivation-hypotheses.md).
+    An override should only be needed if a specific compiled assembly is
+    somehow found to diverge from the computed value; encode_rpc_first_use
+    logs a warning if a registered override disagrees with the computed
+    default, since that would indicate either a bad override or a gap in
+    the derivation.
     """
     METHOD_TAG_MAP[name] = tag
 
@@ -218,12 +262,14 @@ METHOD_SIGNATURES = {
 }
 
 
-# method_tag has no closed-form derivation from method_index, name, RID, or
-# signature (see docs/research/2026-07-12-method-tag-real-derivation.md) — it
-# must be captured empirically from a real Unity-to-Unity pcap per compiled
-# assembly. These are the 13 real values captured for the Loader test
-# assembly; other assemblies need their own captures registered via
-# register_method_tag(s).
+# The 13 real method_tag values captured for the Loader test assembly from a
+# Unity-to-Unity pcap (docs/research/2026-07-12-method-tag-real-derivation.md).
+# compute_method_tag(name) reproduces all 13 of these from the name alone
+# (see docs/plans/method-tag-shared-derivation-hypotheses.md); the shared
+# regression fixture is docs/research/fixtures/method-tag-conformance.json,
+# not this dict. Kept as a historical reference for scripts/tag-collision-
+# server.py and scripts/rpc-tag-phase2-accept-control.py's comments, which
+# point at it by name.
 _LOADER_REAL_TAGS = {
     'RPC_Void': 0,
     'RPC_Int': 8,
@@ -276,8 +322,6 @@ def _register_loader_assembly():
         idx = compute_method_index(rid, _INTERFACE_METHODS)
         METHOD_INDEX_MAP[name] = idx
         INDEX_TO_METHOD[idx] = name
-    for name, tag in _LOADER_REAL_TAGS.items():
-        METHOD_TAG_MAP[name] = tag
     register_method_names(METHOD_SIGNATURES.keys())
     register_method_names(INTERNAL_RPCS)
 
@@ -465,17 +509,19 @@ def encode_rpc_first_use(method_name, params, view_id=1, timestamp_ms=0,
     bs.write_bytes(method_hash)
     # 52-bit internal metadata: method_tag(4) + zeros(16) + remaining_count(16) + constant(16)
     remaining_count = param_bits + 19 + target_bits + relay_bits
-    method_tag = METHOD_TAG_MAP.get(method_name)
-    if method_tag is None:
-        if method_name not in _tag_fallback_warned:
-            _tag_fallback_warned.add(method_name)
+    method_tag = compute_method_tag(method_name)
+    override = METHOD_TAG_MAP.get(method_name)
+    if override is not None:
+        if override != method_tag and method_name not in _tag_mismatch_warned:
+            _tag_mismatch_warned.add(method_name)
             log.warning(
-                "No captured method_tag registered for %r — falling back to "
-                "tag 0. This is a guess, not a derivation; if this method is "
-                "sent first-use to a real Unity client, capture its real tag "
-                "from a pcap and register it with register_method_tag().",
-                method_name)
-        method_tag = 0
+                "Registered method_tag override for %r (%d) diverges from "
+                "compute_method_tag's derived value (%d) — using the "
+                "override, but this indicates either a bad override or a "
+                "gap in the derivation (see "
+                "docs/research/2026-07-12-method-tag-real-derivation.md).",
+                method_name, override, method_tag)
+        method_tag = override
     bs.write_bits(method_tag, 4)
     bs.write_bits(0, 16)      # zeros
     bs.write_u16_be(remaining_count)
@@ -526,12 +572,12 @@ def decode_rpc(payload, bit_length, index_overrides=None):
         guid = bs.read_bytes(6)
         result['class_guid'] = guid.hex()
         hash_bytes = (method_id_bits - 48) // 8
-        if hash_bytes > 0:
-            method_hash = bs.read_bytes(hash_bytes)
-            result['method_hash'] = method_hash.hex()
-            result['method_name'] = lookup_method_by_hash(method_hash.hex()) or 'unknown'
+        method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
+        result['method_hash'] = method_hash.hex()
+        result['method_name'] = lookup_method_by_identifier(guid.hex(), method_hash.hex()) or 'unknown'
 
         hash_extra_bits = method_id_bits - 48
+        result['method_tag'] = bs.read_bits(4)
         bs.pos = 160 + hash_extra_bits + 36
         result['target_view'] = bs.read_u16_be()
         mode_start = 160 + hash_extra_bits + 52
@@ -763,7 +809,7 @@ def decode_batch_index(payload):
         log.warning("RakNet decode: batchIndex hashBytes exceeds cap (%d > 64), rejecting", hash_bytes)
         return None
 
-    bs.read_bytes(6)  # class_guid
+    guid = bs.read_bytes(6)
     method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
 
     total_bits = len(payload) * 8
@@ -780,7 +826,7 @@ def decode_batch_index(payload):
         log.warning("RakNet decode: batchIndex unexpected tail width (%d bits), rejecting", remaining)
         return None
 
-    method_name = lookup_method_by_hash(method_hash.hex())
+    method_name = lookup_method_by_identifier(guid.hex(), method_hash.hex())
     return {'method_name': method_name, 'method_index': method_index}
 
 

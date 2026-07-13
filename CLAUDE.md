@@ -159,3 +159,77 @@ a build's own table in the first place.) Treat re-deriving the formula as
 an absolute last resort, to be attempted only if it turns out to be
 strictly necessary even in the differing-assembly case — prefer
 per-build empirical extraction first.
+
+### Why the Protocol Must Assume Divergent Assemblies
+
+It is tempting to conclude that Unity's legacy RPC protocol assumes
+client and server share one compiled assembly, and that per-build tables
+(`method_tag`, `method_index`) are therefore just unavoidable, opaque
+per-build constants with nothing more to say about them. **This
+conclusion does not survive scrutiny. Two independent facts rule it
+out, and both must be re-derived before re-asserting it:**
+
+1. **Divergent client/server assemblies are Unity's normal deployment
+   shape, not an edge case.** Platform-specific builds (Windows/Mac/Linux/
+   console) and Unity's own headless server build target are different
+   compiled binaries — no guarantee of identical IL2CPP method ordering
+   or stripping, even from identical C# source.
+2. **`method_index` has a real runtime negotiation channel** (msg_id
+   `0x07`: sender announces its own index for a method; the peer adopts
+   that value when replying — see the paragraph above). If both ends
+   were guaranteed an identical, shared index table, this mechanism would
+   be pointless — you'd just use the index unconditionally from the
+   first message. Its existence is evidence Unity's own design assumes
+   the two ends' internal tables *can* diverge, and negotiates around it
+   at runtime rather than assuming a shared static table.
+
+Given both facts, whatever two arbitrary Unity assemblies can reliably
+exchange is limited to data each side can compute *without* seeing the
+other's compiled layout: the RPC method **name** (Huffman-encoded on the
+wire, matched by name-hash — confirmed in `decode_rpc`'s first-use path,
+which never reads `method_tag` at all) and, by convention, its parameter
+signature (never transmitted — assumed already known by both ends).
+Nothing keyed off one side's own whole-assembly compiled metadata
+ordering (a MethodDef RID, a compiled table index) is a safe protocol
+invariant, because the peer has no way to have derived the same value
+from a different, independently-compiled assembly.
+
+**Consequence for `method_tag` specifically — RESOLVED (2026-07-12/13):**
+it is sent only on the *first* message for a method — there is no
+`0x07`-equivalent negotiation channel for it. Given the argument above,
+Unity's design intent implied `method_tag` should *also* be derivable
+from something both ends can compute independently — not a
+whole-assembly-relative property. We'd falsified exactly one hypothesis of
+that kind (`method_index & 0x0F`, i.e. whole-assembly RID ordering — see
+`docs/research/2026-07-12-method-tag-real-derivation.md`) before finding
+the real one: `method_tag`'s upper 2 bits are spillover from the *same*
+Huffman/StringCompressor bitstream `compute_method_id` builds for the
+first-use identifier — continue that bitstream past the byte-aligned cap
+that truncates the method hash, and the next 2 bits (shifted into the
+tag's high bits) are the real tag. Name-only, no signature/RID/compile-
+order dependency, exactly as this argument predicted. Confirmed 13/13
+ground truth + 2/2 out-of-sample + 11/11 blind prediction (see
+`docs/plans/method-tag-shared-derivation-hypotheses.md`); implemented as
+`compute_method_tag()`/`computeMethodTag()`
+(`protocol/unity_protocol.py`/`ts/src/unity/method-hash.ts`), used by
+default in `encode_rpc_first_use`/`encodeRpcFirstUse` with
+`register_method_tag(s)`/`registerMethodTag(s)` retained only as an
+explicit, mismatch-warning override.
+
+This resolution is worth internalizing for future protocol-invariant
+questions in this codebase: the "divergent assemblies" argument above
+predicted a shared-computable derivation would exist for `method_tag`
+specifically because it lacks a runtime negotiation channel, and that
+prediction held up when actually tested — a data point in favor of
+trusting this reasoning pattern (runtime negotiation channel present →
+opaque per-build value tolerated; no negotiation channel → protocol
+design likely assumes a name/source-derivable value) the next time a
+similarly-shaped field turns up. Do not re-assert a same-compiled-assembly,
+"just opaque, nothing more to find" framing for a field that lacks a
+negotiation channel without first checking whether this reasoning applies
+to it — that was the specific failure mode this section originally
+existed to prevent, and it was vindicated here rather than falsified. The
+"do not re-derive `method_index`" guidance above is unaffected — that
+field *does* have a runtime negotiation channel (`0x07`) and remains
+per-build empirical-extraction-only; this resolution applies to
+`method_tag` alone.

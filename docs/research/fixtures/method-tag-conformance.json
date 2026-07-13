@@ -1,0 +1,106 @@
+{
+  "$schema_note": "name -> real method_tag captured from Unity-to-Unity pcaps; compute_method_tag(name)/computeMethodTag(name) must reproduce every entry.",
+  "source": "docs/research/2026-07-12-method-tag-real-derivation.md (13 Loader names), docs/plans/method-tag-shared-derivation-hypotheses.md Phase 1 (11-name blind prediction set + BaseRpc/DerivedRpc out-of-sample check)",
+  "entries": [
+    {
+      "name": "RPC_Void",
+      "tag": 0
+    },
+    {
+      "name": "RPC_Int",
+      "tag": 8
+    },
+    {
+      "name": "RPC_Float",
+      "tag": 12
+    },
+    {
+      "name": "RPC_String",
+      "tag": 0
+    },
+    {
+      "name": "RPC_Vector3",
+      "tag": 8
+    },
+    {
+      "name": "RPC_Quaternion",
+      "tag": 8
+    },
+    {
+      "name": "RPC_Bytes",
+      "tag": 12
+    },
+    {
+      "name": "RPC_IntFloatString",
+      "tag": 8
+    },
+    {
+      "name": "RPC_NetworkPlayer",
+      "tag": 4
+    },
+    {
+      "name": "RPC_NetworkViewID",
+      "tag": 8
+    },
+    {
+      "name": "RPC_Alpha",
+      "tag": 4
+    },
+    {
+      "name": "RPC_Beta",
+      "tag": 4
+    },
+    {
+      "name": "RPC_Gamma",
+      "tag": 4
+    },
+    {
+      "name": "RPC_J",
+      "tag": 4
+    },
+    {
+      "name": "RPC_A",
+      "tag": 4
+    },
+    {
+      "name": "BaseRpc",
+      "tag": 4
+    },
+    {
+      "name": "RPC_D",
+      "tag": 8
+    },
+    {
+      "name": "RPC_Q",
+      "tag": 8
+    },
+    {
+      "name": "RPC_B",
+      "tag": 0
+    },
+    {
+      "name": "RPC_M",
+      "tag": 12
+    },
+    {
+      "name": "RPC_I",
+      "tag": 8
+    },
+    {
+      "name": "RPC_C",
+      "tag": 12
+    },
+    {
+      "name": "RPC_K",
+      "tag": 4
+    },
+    {
+      "name": "RPC_IC",
+      "tag": 4
+    },
+    {
+      "name": "DerivedRpc",
+      "tag": 12
+    }
+  ]
+}

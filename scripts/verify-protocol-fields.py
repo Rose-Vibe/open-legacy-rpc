@@ -112,6 +112,8 @@ def check_target_view(rpc_entry, verbose=False):
     all_bits = ''.join(f'{b:08b}' for b in raw)
 
     if decoded['first_use']:
+        if decoded['method_name'] == 'unknown':
+            return None
         guid, hash_val = compute_method_id(decoded['method_name'])
         method_id_bits = (len(guid) + len(hash_val)) * 8
         hash_extra_bits = method_id_bits - 48
@@ -315,7 +317,6 @@ def verify_roundtrip(rpc_entry, verbose=False):
 
     params = decoded.get('params', [])
     counter = decoded['timestamp_ms']
-    view_id = decoded['view_id']
 
     rpc_mode_val = decoded['rpc_mode']
     if isinstance(rpc_mode_val, RPCMode):
@@ -325,14 +326,18 @@ def verify_roundtrip(rpc_entry, verbose=False):
     else:
         return None
 
+    # view_id is an accepted-but-unused parameter of both encoders (the
+    # wire format has no per-RPC view_id field — decode_rpc never
+    # produces one), so the default is used here rather than one decoded
+    # from the wire.
     try:
         if decoded['first_use']:
             our_data, our_bits = encode_rpc_first_use(
-                method_name, params, view_id, counter, mode,
+                method_name, params, timestamp_ms=counter, mode=mode,
                 target_view=0x2000)
         else:
             our_data, our_bits = encode_rpc_subsequent(
-                method_name, params, view_id, counter, mode,
+                method_name, params, timestamp_ms=counter, mode=mode,
                 target_view=0x2000)
     except Exception:
         return None
