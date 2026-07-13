@@ -98,12 +98,30 @@ C→S  SUBSEQUENT idx=0x6c     (client uses server's registered index ✓)
 ### Evidence: Python wrong-index experiment (experiment 1)
 
 A Python server sent first-use RPCs (accepted) and subsequent-use RPCs
-with deliberately wrong indices (rejected). The pcap revealed Unity
-**did** send a batch index (idx=0x60) after receiving our first-use,
-but our server ignored it and used a fake index (0x30). Unity rejected
-the mismatch.
+with deliberately wrong indices. The pcap revealed Unity **did** send a
+batch index (idx=0x60) after receiving our first-use, but our server
+ignored it and used a fake index (0x30). Unity rejected that mismatch.
 
-This proves the batch index is required for subsequent-use to work.
+**Erratum (2026-07-13):** "Unity rejected the mismatch" only holds for
+arbitrary non-slot index values (this experiment's 0x30/0x08), which
+don't correspond to any real method and produce an explicit `Internal
+RPC error`. The same capture's Phase 6 sent a wrong index that happened
+to land on a *real* method's slot (0x78/120) and Unity did not reject it
+— it silently misdispatched to that method (`RPC_IntFloatString`) with
+garbage-but-well-typed parameters. See
+`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md` for
+the full picture: the batch index this section describes as required and
+correctly-used is, in fact, not reliably usable at all when the sender is
+a non-Unity implementation — every method tested in that follow-up had a
+self-reported batch index that didn't match its own real dispatch slot.
+The cross-binary evidence below (experiment 2) still holds; it's a
+different case (both sides are real Unity, so each side's self-reported
+index is self-consistent with its own dispatch table in a way this
+experiment's non-Unity sender's requested index was not).
+
+This proves the batch index is *sent*, and that Unity's decoder can
+reject packets — not that a non-Unity sender can rely on the reported
+value for correct dispatch. See the erratum above.
 
 ### Sending without knowing the index
 

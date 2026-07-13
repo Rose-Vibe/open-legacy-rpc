@@ -152,6 +152,7 @@ are not fully understood. None of these block Distance integration.
 | §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
 | §3.3.1 | method_tag | Derivation is **not** a formula — `method_index & 0x0F` empirically disproven for 12 of 13 tested methods (2026-07-12); must be captured per-assembly from a real pcap. Confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing and our own single-variable capture test — see Known Issue #1 |
 | §3.2 | subsequent-use RPC, `method_index >= 128` | Header is 4 bits wider (extension flag at bit 89), not a fixed-width field — confirmed against a real Unity client via `scripts/index-sweep-server.py` (2026-07-12/13); see Known Issue #4 for residual uncertainty above index 132 |
+| §3.2.1 | RPC Batch Index (`0x07`) usability for a non-Unity sender | The receiver's self-reported index is **not** usable for subsequent-use encoding when the sender is a non-Unity implementation — confirmed for all 13 Loader RPC methods (2026-07-13); see Known Issue #5 |
 
 ---
 
@@ -230,6 +231,37 @@ distance-server's shipped game has only 7 total `[RPC]`-attributed
 methods, far under 128 (see
 `docs/research/2026-07-11-unity-vs-distance-rpc-model.md`). Revisit only
 if a target game's real dispatch table exceeds ~128 entries.
+
+### 5. RPC Batch Index (`0x07`) reply is not usable for subsequent-use encoding from a non-Unity sender
+
+`docs/research/unity-legacy-networking-wire-format.md` §3.2.1 documents
+the batch index protocol as "sender uses the receiver's registered
+index" — confirmed true for real-Unity-to-real-Unity traffic, but **not**
+confirmed, and now empirically disproven, for a non-Unity sender (this
+repo's Python server) talking to a real Unity client. Tested for all 13
+Loader `[RPC]` methods (`captures/IndexSweep-20260712-235647-*`): the real
+client's own `0x07` reply matched its own real dispatch slot in 0 of 13
+cases. Using the reported value for subsequent-use encoding reliably
+produces a silent non-dispatch or a misdispatch to an unrelated method
+(`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md`, from
+`docs/plans/method-tag-collision-repro.md` scenarios S2-S4 and S8).
+
+Also corrects `2026-06-27-method-index-investigation.md`'s "Python
+wrong-index experiment": a wrong index that happens to land on a real
+method's slot is silently misdispatched with garbage-but-well-typed
+parameters, not rejected — only indices with no corresponding real slot
+produce an explicit `Internal RPC error`.
+
+**Workaround:** `protocol/unity_server.py`'s `_send_rpc_to` currently uses
+`_peer_indices` (the reported value) for subsequent-use encoding — this is
+a known production-code correctness gap. `scripts/index-sweep-server.py`
+demonstrates the fix (compute the static per-method index directly and
+use that instead), but implementing it in the shipped server is deferred
+to a follow-on plan through the full CLAUDE.md pipeline, not done here.
+Until fixed, a caller can avoid the bug entirely by never relying on
+subsequent-use for methods it didn't itself compute the index for — i.e.
+always sending first-use (see §3.2.1's "non-Unity implementation that
+always sends first-use" fallback), at the cost of ~20 extra bytes per RPC.
 
 ---
 

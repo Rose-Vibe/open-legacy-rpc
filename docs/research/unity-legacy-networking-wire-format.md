@@ -275,6 +275,23 @@ subsequent-use) is fully compatible — it just costs ~20 extra bytes per
 RPC for the Huffman hash. No batch index exchange is required in this
 case.
 
+**Erratum (2026-07-13):** the "sender uses the receiver's registered
+index" claim above is confirmed only for real-Unity-to-real-Unity traffic
+(§3.2.1's cross-binary evidence, both sides genuinely running Unity's own
+dispatch logic). When a **non-Unity implementation** is the sender — this
+repo's Python server, sending first-use to a real Unity client — the real
+client's own `0x07` reply does not match its own real dispatch slot for
+any of 13 methods tested. Using the reported value for subsequent-use
+encoding reliably produces either a silent non-dispatch or a misdispatch
+to an unrelated method, depending on whether the sent parameter bytes
+happen to fit that unrelated method's shape. The reliable approach for a
+non-Unity sender is to compute the static per-method index directly (see
+`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md` and
+§3.2.2 below) and use that instead of the peer-reported `0x07` value.
+`protocol/unity_server.py`'s current reliance on the reported value
+(`_peer_indices`) is a known production-code gap, tracked separately —
+see `spec-status.md` Known Issue #5.
+
 ### 3.2.2 Method Index Derivation (Unity internals)
 
 Unity computes the `method_index` deterministically from the .NET
