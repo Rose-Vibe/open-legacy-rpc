@@ -151,6 +151,7 @@ are not fully understood. None of these block Distance integration.
 | §1.4 | split packet reassembly | Tested up to 10KB payloads (M10c) |
 | §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
 | §3.3.1 | method_tag | Derivation is **not** a formula — `method_index & 0x0F` empirically disproven for 12 of 13 tested methods (2026-07-12); must be captured per-assembly from a real pcap. Confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing and our own single-variable capture test — see Known Issue #1 |
+| §3.2 | subsequent-use RPC, `method_index >= 128` | Header is 4 bits wider (extension flag at bit 89), not a fixed-width field — confirmed against a real Unity client via `scripts/index-sweep-server.py` (2026-07-12/13); see Known Issue #4 for residual uncertainty above index 132 |
 
 ---
 
@@ -211,6 +212,24 @@ The 133-bit prefab identifier in `Network.Instantiate` cannot be derived
 from the prefab name — it must be captured from a live Unity instance.
 **Workaround:** Distance doesn't use `Network.Instantiate`, so this is
 non-blocking. For other games, pass-through from captures.
+
+### 4. subsequent-use RPC header width above method_index 132 is unconfirmed
+
+§3.2's extended header (4 bits wider, extension flag at bit 89) is
+confirmed correct for method_index 128–140 via a real-Unity-client sweep
+(`scripts/index-sweep-server.py`, 2026-07-12/13: `NetworkViewID`=128,
+`Alpha`=132, `Beta`=136, `Gamma`=140 all dispatch cleanly with zero `Not
+enough data to read` errors). Only index 132 (`Alpha`) has independent
+confirmation from a genuine real-Unity-to-real-Unity capture
+(`MethodIndexU2U-20260627-145136`); 128/136/140 rely on our own encoder
+producing wire bytes the real client accepts, not a second independent
+capture. It is unknown whether the header widens further for larger
+indices (e.g. >= 256) or whether the +4-bit widening is a fixed constant
+for the whole 128–255 range. **Workaround:** not needed in practice —
+distance-server's shipped game has only 7 total `[RPC]`-attributed
+methods, far under 128 (see
+`docs/research/2026-07-11-unity-vs-distance-rpc-model.md`). Revisit only
+if a target game's real dispatch table exceeds ~128 entries.
 
 ---
 

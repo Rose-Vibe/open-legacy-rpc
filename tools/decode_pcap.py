@@ -201,7 +201,7 @@ def decode_rpc_layer(payload, bit_length, config):
         if 'method_hash' in decoded:
             result['methodHash'] = decoded['method_hash']
     else:
-        method_idx = payload[10] & 0xFE if len(payload) > 10 else None
+        method_idx = decoded.get('method_index')
         if method_idx is not None:
             result['methodIndex'] = method_idx
 
@@ -247,9 +247,11 @@ def _partial_rpc(payload, bit_length):
         first_use = bs.read_bit()
         result['variant'] = 'first_use' if first_use else 'subsequent_use'
         if not first_use:
-            bs.pos = 80
-            method_idx = bs.read_bits(8) & 0xFE
-            result['methodIndex'] = method_idx
+            bs.pos = 81
+            low7 = bs.read_bits(7)
+            bs.pos = 89
+            ext_bit = bs.read_bit()
+            result['methodIndex'] = low7 | (ext_bit << 7)
     except Exception:
         pass
     return result
@@ -271,7 +273,8 @@ def _rpc_remaining_hex(payload, bit_length, decoded):
         hash_extra_bits = len(hash_hex) * 4
         mode_start = 160 + hash_extra_bits + 52
     else:
-        mode_start = 136
+        header_extra = 4 if (decoded.get('method_index') or 0) >= 128 else 0
+        mode_start = 136 + header_extra
 
     params_start_bit = mode_start + 4
     if decoded.get('rpc_mode') == RPCMode.Player:

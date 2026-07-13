@@ -127,8 +127,9 @@ def compute_method_index(method_rid, interface_method_count=0):
 
     Formula: (method_rid - 1 - interface_method_count) * 4
 
-    The index is a 7-bit field (0-127). Methods beyond index 127 cannot
-    use subsequent-use encoding.
+    Subsequent-use encoding supports indices 0-255: a 7-bit low field plus
+    an extension flag for bit 7 (see encode_rpc_subsequent's header_extra
+    handling). Indices >= 256 are not supported — see its docstring.
     """
     idx = (method_rid - 1 - interface_method_count) * 4
     return idx
@@ -158,7 +159,8 @@ def register_method_index_table(method_entries):
 def register_method_indices(indices):
     """Register method indices for game-specific RPC methods.
 
-    indices: dict mapping method name to 7-bit wire-format index.
+    indices: dict mapping method name to wire-format index (0-255; see
+    compute_method_index).
     Use scripts/extract-method-indices.sh on the game's Assembly-CSharp.dll
     to compute these values, then pass the result here.
 
@@ -362,6 +364,11 @@ def encode_rpc_subsequent(method_name, params, view_id=1, timestamp_ms=0,
         method_index = METHOD_INDEX_MAP.get(method_name)
     if method_index is None:
         raise ValueError(f"Unknown method for subsequent encoding: {method_name}")
+    if method_index > 255:
+        raise ValueError(
+            f"method_index {method_index} for {method_name!r} exceeds the "
+            "extended-header encoding's 8-bit range (0-255) — this would "
+            "silently wrap and dispatch to the wrong method on the wire.")
 
     sig = METHOD_SIGNATURES.get(method_name, [])
     param_bs = BitStream()
@@ -369,9 +376,23 @@ def encode_rpc_subsequent(method_name, params, view_id=1, timestamp_ms=0,
     param_data = param_bs.to_bytes()
     param_bits = param_bs.bit_length
 
+    # method_index >= 128 needs a 20-bit span here instead of 16, with an
+    # extension flag at bit 89 (the frame's 2nd reserved bit) and every
+    # downstream field (remaining_bit_count/target_view/mode/params) shifted
+    # out by 4 bits — confirmed via MethodIndexU2U-20260627-145136's real
+    # RPC_Alpha(43) send: wire low7=4 with bit 89 set (real index 132 =
+    # 128 + 4); reading target_view/mode/params 4 bits later than the
+    # low-index layout yields target_view=0x0002 (the known constant),
+    # mode=0=Server (matching the real C# source's explicit RPCMode.Server
+    # call), and a final param of exactly 43. A same-width 1-bit-relocation
+    # fix was tried first and verified NOT to fix real dispatch — the frame
+    # is genuinely wider for these indices, not just differently packed.
+    extended = method_index >= 128
+    header_extra = 4 if extended else 0
+
     relay_bits = 5 if relay else 0
     target_bits = 1 if mode == RPCMode.Player else 0
-    total_bits = 140 + target_bits + param_bits + relay_bits
+    total_bits = 140 + header_extra + target_bits + param_bits + relay_bits
 
     bs = BitStream()
     # msg_id
@@ -382,12 +403,16 @@ def encode_rpc_subsequent(method_name, params, view_id=1, timestamp_ms=0,
     bs.write_u8(0x0b)
     # first_use = 0
     bs.write_bit(0)
-    # method index (7 bits) — bottom 7 bits of method_index
-    bs.write_bits(method_index, 7)
-    # 16 bits of zeros
-    bs.write_u16_be(0)
-    # remaining_bit_count = total_bit_length - 121
-    remaining = total_bits - 121
+    # method index: low 7 bits always here.
+    bs.write_bits(method_index & 0x7F, 7)
+    if extended:
+        bs.write_bit(0)
+        bs.write_bit(1)
+        bs.write_bits(0, 18)
+    else:
+        bs.write_bits(0, 16)
+    # remaining_bit_count = total_bit_length - (121 + header_extra)
+    remaining = total_bits - (121 + header_extra)
     bs.write_u16_be(remaining)
     constant = INTERNAL_RPC_CONSTANT if method_name in INTERNAL_RPCS else _resolve_target_view(target_view)
     bs.write_u16_be(constant)
@@ -504,12 +529,20 @@ def decode_rpc(payload, bit_length):
         mode_start = 160 + hash_extra_bits + 52
         bs.pos = mode_start
     else:
-        bs.pos = 80
-        method_idx = bs.read_bits(8) & 0xFE
+        bs.pos = 81
+        low7 = bs.read_bits(7)
+        # bit 89 (2nd bit of the reserved span) flags a 20-bit-wide header
+        # for method_index >= 128, shifting every downstream field by +4
+        # bits — see encode_rpc_subsequent for the real-capture evidence.
+        bs.pos = 89
+        ext_bit = bs.read_bit()
+        method_idx = low7 | (ext_bit << 7)
+        result['method_index'] = method_idx
         result['method_name'] = INDEX_TO_METHOD.get(method_idx, f'unknown_0x{method_idx:02x}')
-        bs.pos = 120
+        header_extra = 4 if ext_bit else 0
+        bs.pos = 120 + header_extra
         result['target_view'] = bs.read_u16_be()
-        bs.pos = 136
+        bs.pos = 136 + header_extra
 
     mode_val = bs.read_bits(4)
     try:

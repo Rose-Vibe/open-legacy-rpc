@@ -750,6 +750,33 @@ def test_subsequent_remaining_bit_count():
         f"Expected {bits - 121}, got {remaining}"
 
 
+def test_subsequent_extended_header_method_index_128():
+    """method_index >= 128 uses a 4-bit-wider header (extension flag at bit
+    89), confirmed against a real Unity client — see
+    docs/research/2026-07-13-method-index-ceiling-fix.md. RPC_Gamma sits
+    exactly at the 128 boundary in METHOD_INDEX_MAP."""
+    assert METHOD_INDEX_MAP['RPC_Gamma'] == 128
+    data, bits = encode_rpc_subsequent('RPC_Gamma', [43], view_id=1, timestamp_ms=0, target_view=0x2000)
+    all_bits = ''.join(f'{b:08b}' for b in data)
+
+    # Extension flag at bit 89 is set; bit 88 and the rest of the
+    # reserved span (90-107) stay zero.
+    assert all_bits[88] == '0'
+    assert all_bits[89] == '1'
+    assert all_bits[90:108] == '0' * 18
+
+    # remaining_bit_count now sits at 108-123 and uses total_bits - 125.
+    remaining = int(all_bits[108:124], 2)
+    assert remaining == bits - 125, f"Expected {bits - 125}, got {remaining}"
+
+    decoded = decode_rpc(data, bits)
+    assert decoded['method_index'] == 128
+    assert decoded['method_name'] == 'RPC_Gamma'
+    assert decoded['target_view'] == 0x2000
+    assert decoded['rpc_mode'] == RPCMode.Server
+    assert decoded['params'] == [43]
+
+
 def test_first_use_remaining_bit_count():
     """First-use remaining count is param_bits + 19 + target_bits."""
     data, bits = encode_rpc_first_use('RPC_Int', [42], view_id=1, timestamp_ms=0, target_view=0x2000)

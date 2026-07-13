@@ -185,17 +185,58 @@ RPCs use msg_id `0x1b` with RELIABLE_ORDERED reliability.
 Used for the second and later invocations of a given RPC method. The
 receiver has already cached the method from the first-use message.
 
+**method_index < 128** (the common case — low/mid dispatch-table slots):
+
 | Bit Offset | Width | Field |
 |------------|-------|-------|
 | 80 | 1 | first_use = 0 |
-| 81–87 | 7 | method_index (7 bits; actual byte = `index & 0xFE`) |
-| 88–103 | 16 | reserved (must be zero; Unity rejects RPCs with non-zero values) |
+| 81–87 | 7 | method_index (low 7 bits) |
+| 88–103 | 16 | reserved, always zero |
 | 104–119 | 16 | remaining_bit_count = total_bit_length - 121 (uint16 BE; +5 if relayed) |
 | 120–135 | 16 | user_rpc_constant (see §3.6) |
 | 136–139 | 4 | RPCMode |
 | 140 | 0 or 1 | target bit (present only when RPCMode = Player) |
 | 140/141+ | var | parameters |
 | after params | 0 or 5 | relay padding (see §3.7) |
+
+**method_index ≥ 128** (dispatch-table slot needs bit 7): the header is 4
+bits *wider*, not just repacked — every field from `remaining_bit_count`
+onward shifts out by 4 bits, and `remaining_bit_count`'s formula changes
+accordingly:
+
+| Bit Offset | Width | Field |
+|------------|-------|-------|
+| 80 | 1 | first_use = 0 |
+| 81–87 | 7 | method_index (low 7 bits) |
+| 88 | 1 | zero |
+| 89 | 1 | extension flag = 1 (method_index has bit 7 set, i.e. index ≥ 128) |
+| 90–107 | 18 | reserved, always zero |
+| 108–123 | 16 | remaining_bit_count = total_bit_length - 125 (uint16 BE; +5 if relayed) |
+| 124–139 | 16 | user_rpc_constant (see §3.6) |
+| 140–143 | 4 | RPCMode |
+| 144 | 0 or 1 | target bit (present only when RPCMode = Player) |
+| 144/145+ | var | parameters |
+| after params | 0 or 5 | relay padding (see §3.7) |
+
+This was discovered via a static-index-table sweep against a real Unity
+client (`scripts/index-sweep-server.py`): forcing a subsequent-use send at
+a computed index ≥ 128 using the fixed-width (non-extended) layout above
+produced `Internal RPC error. Not enough data to read.` on the real
+client, while a genuine real-Unity-to-real-Unity capture
+(`captures/MethodIndexU2U-20260627-145136-*`) showed the real client
+cleanly dispatching `RPC_Alpha` at wire index 132 using this wider
+layout. Field-by-field comparison of that capture (`target_view` reads
+the expected routing constant, `RPCMode` reads 0=Server matching the C#
+source's explicit call, and the final parameter decodes to exactly the
+sent value) confirmed the +4-bit-wide layout, and re-running the sweep
+with it applied resolved all four previously-failing methods
+(`NetworkViewID`=128, `Alpha`=132, `Beta`=136, `Gamma`=140) with zero
+`Not enough data to read` errors remaining. The exact encoding of the
+extra 4 bits beyond "bit 89 set" is unconfirmed above index 132 (no real
+capture above that value exists) — see Known Issue in `spec-status.md`.
+This ceiling is very unlikely to matter for real Distance traffic, which
+has only 7 total `[RPC]`-attributed methods across the whole shipped
+game, far under 128.
 
 ### 3.2.1 Method Index and First-Use/Subsequent-Use Protocol
 
@@ -604,7 +645,12 @@ Total bit count: `1 + method_id_bit_count + 5`. The RakNet
 bit_length is set to this value (not rounded up); byte padding is
 cosmetic. The 5-bit field stores the method_index right-shifted by 2;
 the receiver left-shifts by 2 to recover the full index used in
-subsequent-use RPC encoding (§3.4, 7-bit field with `& 0xFE` mask).
+subsequent-use RPC encoding (§3.2). Note the 5-bit field can only
+represent indices 0–124 in steps of 4 — it cannot express the ≥128
+indices covered by §3.2's extended-header case, so batch-index
+registration and the actual subsequent-use wire encoding diverge in
+representable range at the high end; this hasn't been observed to
+matter in practice (see §3.2's extended-header note).
 
 #### 3.8.2 Observed Examples
 
