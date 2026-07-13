@@ -495,8 +495,16 @@ def encode_rpc_first_use(method_name, params, view_id=1, timestamp_ms=0,
     return bs.to_bytes(), total_bits
 
 
-def decode_rpc(payload, bit_length):
-    """Decode a Unity RPC message. Returns a dict with decoded fields."""
+def decode_rpc(payload, bit_length, index_overrides=None):
+    """Decode a Unity RPC message. Returns a dict with decoded fields.
+
+    index_overrides, if given, is a dict of method_index -> method_name
+    consulted before the shared static INDEX_TO_METHOD table when resolving
+    a subsequent-use message's method (the caller's own dynamically-learned
+    per-connection indices, which must never be looked up from a table
+    shared across connections). Resolving here, not after return, matters
+    because the param signature lookup below depends on the resolved name.
+    """
     if bit_length < 88:
         raise ValueError(f"RakNet decode: RPC bitLength too short ({bit_length} < 88)")
     bs = BitStream(payload, bit_length)
@@ -538,7 +546,9 @@ def decode_rpc(payload, bit_length):
         ext_bit = bs.read_bit()
         method_idx = low7 | (ext_bit << 7)
         result['method_index'] = method_idx
-        result['method_name'] = INDEX_TO_METHOD.get(method_idx, f'unknown_0x{method_idx:02x}')
+        overridden = index_overrides.get(method_idx) if index_overrides else None
+        result['method_name'] = overridden or \
+            INDEX_TO_METHOD.get(method_idx, f'unknown_0x{method_idx:02x}')
         header_extra = 4 if ext_bit else 0
         bs.pos = 120 + header_extra
         result['target_view'] = bs.read_u16_be()

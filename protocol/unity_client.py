@@ -16,7 +16,6 @@ from .unity_protocol import (
     RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
     decode_rpc, decode_state_sync, METHOD_SIGNATURES, is_rpc,
     MSG_ID_BATCH_INDEX, encode_batch_index, decode_batch_index,
-    INDEX_TO_METHOD,
 )
 from .bitstream import BitStream
 
@@ -131,7 +130,8 @@ class UnityClient:
 
     def _handle_rpc(self, payload, bit_length):
         try:
-            result = decode_rpc(payload, bit_length)
+            result = decode_rpc(payload, bit_length,
+                                 index_overrides=self._our_index_reverse)
         except Exception:
             log.warning("Failed to decode RPC (%d bytes)", len(payload),
                         exc_info=True)
@@ -145,23 +145,11 @@ class UnityClient:
                     self._next_our_index += 4
                     self._our_indices[method] = idx
                     self._our_index_reverse[idx] = method
-                    INDEX_TO_METHOD[idx] = method
                 our_idx = self._our_indices[method]
                 batch_payload, batch_bits = encode_batch_index(method, our_idx)
                 self._raknet.send_message(batch_payload,
                                           Reliability.UNRELIABLE,
                                           bit_length=batch_bits)
-        else:
-            method_name = result.get('method_name', '')
-            if method_name.startswith('unknown_0x'):
-                try:
-                    method_idx = int(method_name[len('unknown_0x'):], 16)
-                except ValueError:
-                    method_idx = None
-                if method_idx is not None:
-                    resolved = self._our_index_reverse.get(method_idx)
-                    if resolved:
-                        result['method_name'] = resolved
 
         method = result.get('method_name', '')
         if method in self._rpc_handlers:

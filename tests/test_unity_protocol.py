@@ -669,6 +669,41 @@ def test_register_method_indices_does_not_derive_tags():
         INDEX_TO_METHOD.update(saved_reverse)
 
 
+def test_decode_rpc_index_overrides_take_priority_over_global_static_table():
+    """A caller's own dynamically-learned index_overrides must win over the
+    global static table for the same index. This is the leak fix's exit
+    criterion: local-first resolution must not be "whichever connection
+    wrote the global last" (the cross-connection leak,
+    docs/plans/global-index-table-cross-connection-leak.md), and also must
+    not lose to a legitimately pre-registered static entry that happens to
+    share the same numeric index. Also confirms params decode using the
+    overridden name's signature, not the static name's — the signature
+    lookup inside decode_rpc must see the override, not resolve it after
+    the fact."""
+    saved_index = dict(METHOD_INDEX_MAP)
+    saved_reverse = dict(INDEX_TO_METHOD)
+    try:
+        register_method_indices({'RPC_StaticCollider': 4})
+        payload, bits = encode_rpc_subsequent(
+            'RPC_Int', [42], target_view=0x2000, method_index=4)
+
+        result = decode_rpc(payload, bits, index_overrides={4: 'RPC_Int'})
+        assert result['method_name'] == 'RPC_Int', \
+            f"local override must win over global static table: {result['method_name']}"
+        assert result['params'] == [42], \
+            f"params must decode using the overridden name's signature: {result}"
+
+        # Same wire frame, no override: falls back to the global static
+        # table, proving the override (not luck) drove the result above.
+        result_no_override = decode_rpc(payload, bits)
+        assert result_no_override['method_name'] == 'RPC_StaticCollider'
+    finally:
+        METHOD_INDEX_MAP.clear()
+        METHOD_INDEX_MAP.update(saved_index)
+        INDEX_TO_METHOD.clear()
+        INDEX_TO_METHOD.update(saved_reverse)
+
+
 def test_method_tag_defaults_to_zero(caplog):
     """Unregistered methods use method_tag=0 and log a one-time warning."""
     saved_tag = dict(METHOD_TAG_MAP)
