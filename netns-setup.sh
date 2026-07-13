@@ -22,7 +22,7 @@ VETH_NS="veth-unet-ns"
 HOST_IP="10.200.1.1"
 NS_IP="10.200.1.2"
 SUBNET="24"
-USER="server-mint"
+USER="${SUDO_USER:-$(whoami)}"
 
 echo "=== Setting up network namespace '$NS' ==="
 
