@@ -3,7 +3,7 @@
 Current status of every section in the wire format reference spec,
 plus known unknowns and issues discovered during implementation.
 
-Last updated: 2026-06-27
+Last updated: 2026-07-13
 
 ---
 
@@ -321,6 +321,39 @@ already correct** — no code change required there. The one real, separate
 Python-only bug found this session is a shared-global cross-connection
 leak on the *inbound decode* side (`INDEX_TO_METHOD`), unrelated to this
 issue, fixed via `docs/plans/global-index-table-cross-connection-leak.md`.
+
+### 7. Peer-reported batch index always outranks a registered static index
+
+Both `ts/src/unity/server.ts`'s `sendRpcTo` (lines ~271-277) and
+`protocol/unity_server.py`'s `_send_rpc_to` (line ~265) check the
+peer-reported `0x07` index (`peerIndices`/`_peer_indices`) *before*
+falling back to `hasMethodIndex`/a caller-registered static index. This
+means a stale or incorrect client self-report silently wins over a
+correctly-registered static index, with no way to prefer the static value
+per-method.
+
+This surfaced in practice during distance-server's Finding A investigation
+(status-inbox thread with `reference-twin-torch`, 2026-07-13): their
+`DistanceServer.ts` never called `registerMethodIndices()`, so the peer's
+self-reported index (itself wrong, per Known Issue #5's now-retracted
+symptom) was silently used for every subsequent-use send once the client
+announced one via `0x07`. Once traced, this was distance-server's own gap
+(no static indices registered), not a bug in this library. But the
+priority order itself — peer-reported over registered — remains a live
+footgun for any future caller that *does* register real static indices via
+`registerMethodIndices`/`register_method_index_table`: those indices can
+still be silently overridden by a bad peer self-report, with no
+per-method way to say "trust my registration over whatever this peer
+claims."
+
+**Workaround:** callers that have registered real static indices should
+pass `usePeerBatchIndices: false` (TS) to `UnityServer`/`RakNetServer`
+options, or the Python equivalent, to disable trusting peer self-reports
+entirely. **Not fixed:** no per-method override exists yet (e.g. "prefer
+registered index for this method, fall back to peer report only if
+unregistered"). Flipping the priority outright, or adding a per-method
+override, has not been implemented — distance-server suggested it but no
+plan has been written for it in this repo yet.
 
 ---
 
