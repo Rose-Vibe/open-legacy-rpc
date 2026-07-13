@@ -84,8 +84,15 @@ describe('Batch Index (0x07)', () => {
   // Real msg_id 0x07 frames captured from a live Distance client session
   // (reference-server capture, packet indices 19 and 21). Verifies the
   // header before classGuid is 31 bits with no separate flag bit, not
-  // 32 bits + 1 flag bit — the previous framing silently corrupted every
+  // 32 bits + 1 flag bit — an earlier framing bug silently corrupted every
   // client-sent batch-index registration, so `peerIndices` never populated.
+  //
+  // methodIndex values below were recomputed 2026-07-13 after discovering
+  // decodeBatchIndex itself had a second, independent bug: it read 5 bits
+  // starting 1 bit too early (landing partly on hash-adjacent bits) instead
+  // of the frame's actual index field (the low 7 bits of the final byte).
+  // The previous values here (84/56/52) were themselves misparse artifacts;
+  // see docs/research/2026-07-13-batch-index-decoder-was-broken.md.
   it('decodes real captured batch-index frames from a Distance client', () => {
     registerMethodNames([
       'ReceiveClientToServerEvent',
@@ -110,14 +117,14 @@ describe('Batch Index (0x07)', () => {
         name: 'SubmitServerNetworkTimeSync',
         classGuid: '2ac59fa25d58',
         methodHash: '333c64c42e98cbfa92682acaca85',
-        methodIndex: 56,
+        methodIndex: 104,
       },
       {
         raw: '07000000481905012789db24057528ab06678caad3c15ad4',
         name: 'ReceiveClientToServerEvent',
         classGuid: '0c828093c4ed',
         methodHash: '9202ba94558333c65569e0ad',
-        methodIndex: 52,
+        methodIndex: 84,
       },
     ] as const;
 
@@ -131,6 +138,107 @@ describe('Batch Index (0x07)', () => {
       expect(bytesToHex(classGuid)).toBe(c.classGuid);
       expect(bytesToHex(methodHash)).toBe(c.methodHash);
     }
+  });
+
+  // Real msg_id 0x07 frames from captures/IndexSweep-20260712-235647.pcap
+  // and captures/CrossBinary-20260628-004945.pcap, decoded bit-by-bit by
+  // hand (not via this repo's own encoder) to derive the true field
+  // independent of any of this repo's prior (wrong) assumptions. The
+  // sub-128 cases are end-aligned (last byte & 0x7F); the >=128 cases use
+  // a 5-bit quotient spread across non-contiguous tail-bit positions (see
+  // encodeBatchIndex's doc comment) — this test set only exercises the
+  // low end of that range (128-140); see the large-delta test below for
+  // higher values. Both verified 2026-07-13; see
+  // docs/research/2026-07-13-batch-index-decoder-was-broken.md.
+  it('decodes real IndexSweep batch-index frames (sub-128 index)', () => {
+    const cases = [
+      { raw: '0700000024192764edab62abd08e5c', name: 'RPC_Void', methodIndex: 92 },
+      { raw: '0700000020192764edab63a8ad60', name: 'RPC_Int', methodIndex: 96 },
+      { raw: '0700000024192764edab62ac9435e4', name: 'RPC_Float', methodIndex: 100 },
+      { raw: '0700000028192764edab63565e50a668', name: 'RPC_String', methodIndex: 104 },
+      { raw: '0700000030192764edab62abc28b8cabc16c', name: 'RPC_Vector3', methodIndex: 108 },
+      { raw: '0700000030192764edab62abb5b58c924170', name: 'RPC_Quaternion', methodIndex: 112 },
+      { raw: '0700000028192764edab6350aec6d5f4', name: 'RPC_Bytes', methodIndex: 116 },
+      { raw: '070000003c192764edab63a8ad59286bab2f285378', name: 'RPC_IntFloatString', methodIndex: 120 },
+      { raw: '070000003c192764edab6262174c65fcec935632fc', name: 'RPC_NetworkPlayer', methodIndex: 124 },
+    ] as const;
+
+    for (const c of cases) {
+      const decoded = decodeBatchIndex(hexToBytes(c.raw));
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodIndex).toBe(c.methodIndex);
+    }
+  });
+
+  it('decodes real IndexSweep batch-index frames (>=128 extended index)', () => {
+    const cases = [
+      { raw: '0700000040192764edab6262174c65faaf20a7519d0400', methodIndex: 128 },
+      { raw: '0700000028192764edab62a92530ca8440', methodIndex: 132 },
+      { raw: '0700000024192764edab635016ca8480', methodIndex: 136 },
+      { raw: '0700000028192764edab62ad369a3284c0', methodIndex: 140 },
+    ] as const;
+
+    for (const c of cases) {
+      const decoded = decodeBatchIndex(hexToBytes(c.raw));
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodIndex).toBe(c.methodIndex);
+    }
+  });
+
+  it('decodes real CrossBinary batch-index frames from both build sides', () => {
+    const cases = [
+      { raw: '0700000020192764edab63a8ad60', methodIndex: 96 },
+      { raw: '0700000020192764edab63a8ad6c', methodIndex: 108 },
+      { raw: '0700000024192764edab62ac9435e4', methodIndex: 100 },
+      { raw: '0700000024192764edab62ac9435f0', methodIndex: 112 },
+      { raw: '0700000028192764edab63565e50a668', methodIndex: 104 },
+      { raw: '0700000028192764edab63565e50a674', methodIndex: 116 },
+    ] as const;
+
+    for (const c of cases) {
+      const decoded = decodeBatchIndex(hexToBytes(c.raw));
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodIndex).toBe(c.methodIndex);
+    }
+  });
+
+  // Real msg_id 0x07 frames from captures/LargeDelta-20260713-031337.pcap,
+  // spanning method_index 160-232 — well past the old (wrong) 128-140
+  // ceiling. These fit the 5-bit non-contiguous quotient formula (extending
+  // the representable range to 252) and were used to verify the Python
+  // codec fix in protocol/unity_protocol.py; mirrored here for TS parity.
+  // See docs/plans/large-delta-cross-assembly-index-test.md.
+  it('decodes real LargeDelta batch-index frames spanning the extended (>140) range', () => {
+    const cases = [
+      { raw: '0700000030192764edab62abb5b58c92410600', methodIndex: 160 },
+      { raw: '0700000028192764edab6350aec6d58640', methodIndex: 164 },
+      { raw: '070000003c192764edab63a8ad59286bab2f28530740', methodIndex: 180 },
+      { raw: '070000003c192764edab6262174c65fcec93563287c0', methodIndex: 188 },
+      { raw: '0700000040192764edab6262174c65faaf20a7519d0940', methodIndex: 212 },
+      { raw: '0700000028192764edab62a92530ca8980', methodIndex: 216 },
+      { raw: '0700000024192764edab635016ca8a40', methodIndex: 228 },
+      { raw: '0700000028192764edab62ad369a328a80', methodIndex: 232 },
+    ] as const;
+
+    for (const c of cases) {
+      const decoded = decodeBatchIndex(hexToBytes(c.raw));
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodIndex).toBe(c.methodIndex);
+    }
+  });
+
+  it('encode/decode round-trips across the extended (>140) range', () => {
+    for (const idx of [144, 160, 200, 252]) {
+      const { data } = encodeBatchIndex('RPC_Int', idx);
+      const decoded = decodeBatchIndex(data);
+      expect(decoded).not.toBeNull();
+      expect(decoded!.methodIndex).toBe(idx);
+    }
+  });
+
+  it('encodeBatchIndex rejects indices past the confirmed tail-encoding range', () => {
+    expect(() => encodeBatchIndex('RPC_Int', 256)).toThrow();
+    expect(() => encodeBatchIndex('RPC_Int', 97)).toThrow(); // not a multiple of 4
   });
 });
 

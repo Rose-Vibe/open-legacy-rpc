@@ -152,7 +152,7 @@ are not fully understood. None of these block Distance integration.
 | §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
 | §3.3.1 | method_tag | Derivation is **not** a formula — `method_index & 0x0F` empirically disproven for 12 of 13 tested methods (2026-07-12); must be captured per-assembly from a real pcap. Confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing and our own single-variable capture test — see Known Issue #1 |
 | §3.2 | subsequent-use RPC, `method_index >= 128` | Header is 4 bits wider (extension flag at bit 89), not a fixed-width field — confirmed against a real Unity client via `scripts/index-sweep-server.py` (2026-07-12/13); see Known Issue #4 for residual uncertainty above index 132 |
-| §3.2.1 | RPC Batch Index (`0x07`) usability for a non-Unity sender | The receiver's self-reported index is **not** usable for subsequent-use encoding when the sender is a non-Unity implementation — confirmed for all 13 Loader RPC methods (2026-07-13); see Known Issue #5 |
+| §3.2.1 | RPC Batch Index (`0x07`) usability for a non-Unity sender | **Retracted 2026-07-13 (was a decoder bug, not a protocol property):** the receiver's self-reported index **is** usable for subsequent-use encoding, matching the announcer's own real dispatch slot for all 13 Loader RPC methods once `decode_batch_index`'s bit layout was fixed; real Unity uses an adoption recipe (sender encodes using the value the receiver announced). See Known Issue #5 |
 
 ---
 
@@ -232,36 +232,73 @@ methods, far under 128 (see
 `docs/research/2026-07-11-unity-vs-distance-rpc-model.md`). Revisit only
 if a target game's real dispatch table exceeds ~128 entries.
 
-### 5. RPC Batch Index (`0x07`) reply is not usable for subsequent-use encoding from a non-Unity sender
+### 5. RETRACTED (2026-07-13): RPC Batch Index (`0x07`) reply IS usable for subsequent-use encoding — the decoder was broken, not the protocol
 
-`docs/research/unity-legacy-networking-wire-format.md` §3.2.1 documents
-the batch index protocol as "sender uses the receiver's registered
-index" — confirmed true for real-Unity-to-real-Unity traffic, but **not**
-confirmed, and now empirically disproven, for a non-Unity sender (this
-repo's Python server) talking to a real Unity client. Tested for all 13
-Loader `[RPC]` methods (`captures/IndexSweep-20260712-235647-*`): the real
-client's own `0x07` reply matched its own real dispatch slot in 0 of 13
-cases. Using the reported value for subsequent-use encoding reliably
-produces a silent non-dispatch or a misdispatch to an unrelated method
-(`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md`, from
-`docs/plans/method-tag-collision-repro.md` scenarios S2-S4 and S8).
+This Known Issue previously claimed the real client's `0x07` reply
+"matched its own real dispatch slot in 0 of 13 cases." That was a
+`decode_batch_index` bit-layout bug (fixed; see
+`docs/research/2026-07-13-batch-index-decoder-was-broken.md`), not a real
+protocol property. Re-decoding the same capture
+(`captures/IndexSweep-20260712-235647-*`) with the fixed decoder: the
+client's `0x07` reply matches its own real dispatch slot in **13 of 13**
+cases. `docs/research/unity-legacy-networking-wire-format.md` §3.2.1's
+"sender uses the receiver's registered index" description was correct all
+along, for a non-Unity sender too — confirmed further by a
+direction-resolved re-read of `CrossBinary-20260628-004945.pcap` (real
+Unity↔Unity traffic): the sender of subsequent-use always uses the value
+the *receiver* previously announced (adoption).
 
-Also corrects `2026-06-27-method-index-investigation.md`'s "Python
-wrong-index experiment": a wrong index that happens to land on a real
-method's slot is silently misdispatched with garbage-but-well-typed
-parameters, not rejected — only indices with no corresponding real slot
-produce an explicit `Internal RPC error`.
+Caveat, narrowed but not fully resolved by this correction: the announced
+index was only *verified-dispatchable* for 11 of the 13 methods in the
+original sweep (all except `RPC_Beta`/`RPC_Gamma` at 136/140, which
+announce correctly but got "node not in map" on subsequent-use in that
+sweep) — see `docs/research/2026-07-13-subsequent-use-static-index-
+dispatch.md`'s Known Issue for that specific gap. A later, larger
+non-uniform-delta test
+(`docs/research/2026-07-13-large-delta-cross-assembly-test.md`) sent
+`RPC_Beta`/`RPC_Gamma` subsequent-use at much higher indices via the full
+first-use → 0x07 announce → adopt sequence and got clean dispatch with no
+"node not in map" — the gap did not reproduce, suggesting it was specific
+to the original sweep's methodology (forcing a raw Cecil-computed index
+directly) rather than a systemic protocol issue, but this is not
+confirmed and not chased further per `CLAUDE.md`.
 
-**Workaround:** `protocol/unity_server.py`'s `_send_rpc_to` currently uses
-`_peer_indices` (the reported value) for subsequent-use encoding — this is
-a known production-code correctness gap. `scripts/index-sweep-server.py`
-demonstrates the fix (compute the static per-method index directly and
-use that instead), but implementing it in the shipped server is deferred
-to a follow-on plan through the full CLAUDE.md pipeline, not done here.
-Until fixed, a caller can avoid the bug entirely by never relying on
-subsequent-use for methods it didn't itself compute the index for — i.e.
-always sending first-use (see §3.2.1's "non-Unity implementation that
-always sends first-use" fallback), at the cost of ~20 extra bytes per RPC.
+Also retracts the associated "Also corrects... Python wrong-index
+experiment" note's framing implicitly, since it was reasoning about
+symptoms of the same decoder bug — the specific factual claim there (a
+wrong index landing on a real slot silently misdispatches rather than
+being rejected) is independent of the decoder bug and remains true.
+
+### 6. `>=128` batch-index tail is a 5-bit non-contiguous quotient (was thought to be 2-bit), and a reproducible "-12" offset exists between the wire-announced index and the Cecil extractor's output
+
+The `>=128` batch-index tail fix in Known Issue #5 above was originally
+fitted against only 4 real frames (quotient values 0-3), which a 2-bit
+field fits by coincidence.
+`docs/research/2026-07-13-large-delta-cross-assembly-test.md` tested a
+much wider real index range (128-244) and found the tail actually carries
+a 5-bit quotient spread across non-contiguous bit positions, extending
+the representable range to 128-252 (see
+`docs/research/unity-legacy-networking-wire-format.md` §3.8.1 for the bit
+layout; fixed in both `protocol/unity_protocol.py` and
+`ts/src/unity/rpc.ts`).
+
+The same test also found a constant "-12" offset between the real
+wire-announced `0x07` index for a method and
+`scripts/extract-method-indices.cs`'s (Cecil) computed index for that
+same method in the same build — reproducible across two different
+captures and both builds tested. This does not affect the adoption
+recipe (both sides always use each other's *announced* value, never a
+Cecil-computed one) but means the Cecil extractor's output should not be
+assumed to equal the real wire-announced index without cross-checking
+against a capture. Not chased to a root cause per `CLAUDE.md`'s standing
+guidance against re-deriving the static index formula.
+
+**No workaround needed; `protocol/unity_server.py`'s `_send_rpc_to`'s use
+of `_peer_indices` (the reported value) for subsequent-use encoding was
+already correct** — no code change required there. The one real, separate
+Python-only bug found this session is a shared-global cross-connection
+leak on the *inbound decode* side (`INDEX_TO_METHOD`), unrelated to this
+issue, fixed via `docs/plans/global-index-table-cross-connection-leak.md`.
 
 ---
 

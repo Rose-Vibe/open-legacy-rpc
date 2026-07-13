@@ -275,22 +275,37 @@ subsequent-use) is fully compatible — it just costs ~20 extra bytes per
 RPC for the Huffman hash. No batch index exchange is required in this
 case.
 
-**Erratum (2026-07-13):** the "sender uses the receiver's registered
-index" claim above is confirmed only for real-Unity-to-real-Unity traffic
-(§3.2.1's cross-binary evidence, both sides genuinely running Unity's own
-dispatch logic). When a **non-Unity implementation** is the sender — this
-repo's Python server, sending first-use to a real Unity client — the real
-client's own `0x07` reply does not match its own real dispatch slot for
-any of 13 methods tested. Using the reported value for subsequent-use
-encoding reliably produces either a silent non-dispatch or a misdispatch
-to an unrelated method, depending on whether the sent parameter bytes
-happen to fit that unrelated method's shape. The reliable approach for a
-non-Unity sender is to compute the static per-method index directly (see
-`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md` and
-§3.2.2 below) and use that instead of the peer-reported `0x07` value.
-`protocol/unity_server.py`'s current reliance on the reported value
-(`_peer_indices`) is a known production-code gap, tracked separately —
-see `spec-status.md` Known Issue #5.
+**Erratum (2026-07-13), retracted same day:** an earlier version of this
+paragraph claimed the "sender uses the receiver's registered index" rule
+above did not hold for a non-Unity sender (this repo's Python server
+talking to a real Unity client) — that a real client's own `0x07` reply
+did not match its own real dispatch slot for any of 13 methods tested.
+That claim was traced to a `decode_batch_index` bit-layout bug, not a
+real protocol property (see
+`docs/research/2026-07-13-batch-index-decoder-was-broken.md`). With the
+fixed decoder, the client's `0x07` reply matches its own real dispatch
+slot for **all 13** methods, and the "sender uses the receiver's
+registered index" rule holds for a non-Unity sender exactly as documented
+above — confirmed further by a direction-resolved read of real
+Unity-to-Unity traffic (`CrossBinary-20260628-004945.pcap`): the endpoint
+that announces an index via `0x07` always later *receives* subsequent-use
+traffic at that index (adoption), never sends at it.
+`protocol/unity_server.py`'s reliance on the reported value
+(`_peer_indices`) for outbound subsequent-use encoding is correct as-is;
+no fix is needed there. The one real, separate gap found is Python-only
+and on the *inbound decode* side: `decode_rpc` resolves a subsequent-use
+method name from a shared global table instead of the instance's own
+previously-announced index — see
+`docs/plans/global-index-table-cross-connection-leak.md` and
+`spec-status.md` Known Issue #5 (also retracted/corrected).
+
+One caveat this correction does not resolve: `0x07` is verified
+*dispatchable* only for 11 of 13 methods in the sweep that established
+this — `RPC_Beta`/`RPC_Gamma` (indices 136/140) announce cleanly via
+`0x07` and dispatch first-use cleanly, but got "node not in map" on
+subsequent-use in that same sweep. See
+`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md` for
+that still-open item.
 
 ### 3.2.2 Method Index Derivation (Unity internals)
 
@@ -636,52 +651,95 @@ if relay:
 
 After receiving a first-use RPC for a method it hasn't seen before, the
 receiver sends an **RPC Batch Index** message (msg_id `0x07`) back to the
-sender. This message registers the receiver's own `method_index` for that
-method, telling the sender what index to use in subsequent-use messages.
+sender.
+
+**Corrected 2026-07-13 (this section previously said the opposite):**
+this message DOES register a usable dispatch index, and the sender DOES
+use its value for subsequent-use encoding. An earlier version of this
+document (and an earlier phase of this investigation) had retracted that
+model, based on a from-scratch re-decode that turned out to use a
+`decode_batch_index` with its own, different bit-layout bug (wrong
+5-bit-field-then-`<<2` formula; see
+`docs/research/2026-07-13-batch-index-decoder-was-broken.md` for the fix
+and full verification). With the corrected decoder:
+
+- **0x07 carries the announcer's own real static dispatch index** for
+  the named method — confirmed byte-exact against independently-known
+  ground truth for all 13 Loader RPC methods in the IndexSweep captures,
+  and for the CrossBinary capture's Int/Float/String/Alpha methods.
+- **Real Unity uses an adoption recipe**: the sender of a subsequent-use
+  RPC always encodes using the index the *receiver* previously announced
+  via 0x07 for that method (not its own static index); the receiver
+  decodes inbound subsequent-use via the index *it itself* previously
+  announced. This is direction-resolved from real Unity-to-Unity traffic
+  (`CrossBinary-20260628-004945.pcap`), not inferred — see §3.8.2.
+
+This generalizes correctly to genuinely different assemblies: each side
+tells the other what index to use, so the sender never needs to know the
+receiver's static table by any out-of-band means.
 
 The message uses UNRELIABLE reliability (no retransmit).
 
 #### 3.8.1 Wire Format
 
-| Offset | Size | Field |
-|--------|------|-------|
-| 0 | 1 | msg_id = `0x07` |
-| 1–4 | 4 | `method_id_bit_count / 2` (uint32 BE) |
-| 5+ | var | BitStream payload (see below) |
-
-The BitStream payload contains:
+Layout, in bits from the start of the message (post-881f335; matching
+`protocol/unity_protocol.py:decode_batch_index`):
 
 | Bit Offset | Width | Field |
 |------------|-------|-------|
-| 0 | 1 | flag (observed: always 0) |
-| 1 | N | method_id (N = `method_id_bit_count`, same encoding as §3.3.2) |
-| 1+N | 5 | method_index >> 2 (the sender's own index for the method, divided by 4) |
-| 1+N+5 | pad | zero padding to byte boundary |
+| 0 | 8 | msg_id = `0x07` |
+| 8 | 31 | `quarter_bits` (length field; `method_id_bits = quarter_bits * 4`) |
+| 39 | 48 | class_guid (6 bytes) |
+| 39+48 | `method_id_bits - 48` | method_hash (`hash_bytes = method_id_bits/8 - 6`) |
+| ... | 9 or 17 | trailing tail containing `method_index` (see below) |
 
-Total bit count: `1 + method_id_bit_count + 5`. The RakNet
-bit_length is set to this value (not rounded up); byte padding is
-cosmetic. The 5-bit field stores the method_index right-shifted by 2;
-the receiver left-shifts by 2 to recover the full index used in
-subsequent-use RPC encoding (§3.2). Note the 5-bit field can only
-represent indices 0–124 in steps of 4 — it cannot express the ≥128
-indices covered by §3.2's extended-header case, so batch-index
-registration and the actual subsequent-use wire encoding diverge in
-representable range at the high end; this hasn't been observed to
-matter in practice (see §3.2's extended-header note).
+There is no separate leading flag bit — the 31-bit `quarter_bits` field
+sits directly after the 8-bit msg_id, with no bit 0 reserved. There is
+also no standalone 5-bit index field partway through the frame — that
+was the bug. The real index is recovered from the frame's **trailing
+bits**, counted from the end:
+
+- If 9 bits remain after the hash: `method_index = payload[-1] & 0x7F`
+  (values 0–127).
+- If 17 bits remain: a 5-bit quotient `(method_index - 128) / 4` is
+  spread across non-contiguous bit positions within the 17-bit tail
+  (0-indexed from the start of the tail, MSB-first): position 5 =
+  quotient bit 4 (weight 16), position 6 = a constant flag always 1
+  (semantics unknown), position 7 = bit 3, position 8 = bit 2, position
+  9 = bit 1, position 10 = bit 0. Positions 0-4 and 11-16 are
+  unconfirmed/padding, always 0 in real frames.
+  `method_index = 128 + quotient * 4`, confirmed range 128-252 (fitted
+  2026-07-13 against 12 real frames spanning 128-232, superseding an
+  earlier 2-bit-only fit that only had 4 frames, all with quotient <= 3,
+  to fit against — see
+  `docs/research/2026-07-13-large-delta-cross-assembly-test.md`).
+
+**Do not read this field positionally from raw bytes by hand without
+accounting for bit-level (non-byte-aligned) offsets** — the earlier,
+now-retracted "0x07 is inert" conclusion came from exactly this kind of
+manual byte misread; always verify against the actual decoder logic on
+real frames.
 
 #### 3.8.2 Observed Examples
 
-From a cross-binary experiment with original (O) and patched (P) builds:
+From the CrossBinary experiment, re-decoded 2026-07-13 with the corrected
+decoder and read with resolved src/dst direction (server=port 7777,
+client=port 41182):
 
-| Direction | Method | method_id (hex) | Registered idx | Build |
-|-----------|--------|-----------------|----------------|-------|
-| O→P | RPC_Int | 0c93b276d5b1d456 | 0x60 | Original |
-| P→O | RPC_Int | 0c93b276d5b1d456 | 0x6c | Patched |
-| O→P | RPC_Float | 0c93b276d5b1564a1a | 0x64 | Original |
-| P→O | RPC_Float | 0c93b276d5b1564a1a | 0x70 | Patched |
+| Announcer (0x07 direction) | Method | 0x07 value | Later subsequent-use sender | SU destination |
+|-----------------------------|--------|-----------|------------------------------|-----------------|
+| client→server | RPC_Int | 96 | server | client (the announcer) |
+| server→client | RPC_Int | 108 | client | server (the announcer) |
+| client→server | RPC_Float | 100 | server | client |
+| server→client | RPC_Float | 112 | client | server |
+| client→server | RPC_String | 104 | server | client |
+| server→client | RPC_String | 116 | client | server |
+| client→server | RPC_Alpha (≥128) | 132 | server | client |
 
-The index difference (0x0c = 12) matches exactly 3 extra [RPC] methods
-× 4 stride added by the patching.
+In every row, the endpoint that announces an index via 0x07 later
+*receives* subsequent-use traffic at that index — never sends at it.
+This directly confirms adoption and rules out "each side always uses its
+own static index regardless of peer."
 
 #### 3.8.3 Protocol Sequence
 
@@ -689,28 +747,61 @@ For method M between peers A and B:
 
 ```
 A → B:  FIRST-USE [M] (hash, RELIABLE_ORDERED)
-B → A:  BATCH INDEX [M, idx=Y] (UNRELIABLE)    ← B's own index
-A → B:  SUBSEQUENT-USE [M, idx=Y] (RELIABLE_ORDERED)
+B → A:  BATCH INDEX [M, idx=B's own static index for M] (UNRELIABLE)
+A → B:  SUBSEQUENT-USE [M, idx=B's announced index] (RELIABLE_ORDERED)   ← A adopts B's value
+B decodes inbound subsequent-use for M using idx=B's own announced value.
 ```
 
-A uses B's registered index Y (not A's own index) for all subsequent
-calls to M addressed to B. If A also calls M and B has a different index,
-B separately registers its index with A.
+A never needs to know B's static index table by any out-of-band means —
+B's own 0x07 announcement supplies it. This is symmetric: B does the
+same in the other direction using A's announcement.
 
 #### 3.8.4 Implementer Notes
 
 A non-Unity implementation that always sends first-use does not need to
-send or process batch index messages. However, to support subsequent-use
-(saving ~20 bytes per RPC), an implementation must:
+send or process batch index messages — always compatible, at the cost
+of ~20 extra bytes per RPC.
 
-1. **Receiving side:** After processing an incoming first-use, send a
-   batch index message containing the receiver's own `method_index` for
-   that method.
-2. **Sending side:** Listen for incoming batch index messages. Store the
-   registered index per peer per method. Use the registered index (not
-   the local index) when encoding subsequent-use.
-3. **Fallback:** If no batch index is received, continue sending
-   first-use indefinitely.
+To support subsequent-use encoding/decoding (saving those bytes), an
+implementation should: (1) announce its own real static per-method index
+via 0x07 after receiving each first-use, using per-build empirical
+(Cecil) extraction to obtain that index — per `CLAUDE.md`, do not
+attempt to re-derive the static index formula from scratch; (2) track
+each peer's announced index per method and use it for outbound
+subsequent-use encoding to that peer (adoption); (3) decode inbound
+subsequent-use using its own previously-announced index for that method,
+not a value read from a shared/global table keyed only by index number —
+see `docs/plans/global-index-table-cross-connection-leak.md` for a
+concrete bug this scoping mistake caused in this repo's Python
+implementation.
+
+One caveat, narrowed but not fully resolved: an earlier sweep
+(`index-sweep-server.py`) found `RPC_Beta`/`RPC_Gamma` (indices 136/140)
+announce cleanly via 0x07 and dispatch first-use cleanly, but got "node
+not in map" on subsequent-use — see
+`docs/research/2026-07-13-subsequent-use-static-index-dispatch.md`. A
+later, larger non-uniform-delta test
+(`docs/research/2026-07-13-large-delta-cross-assembly-test.md`) sent
+`RPC_Beta`/`RPC_Gamma` subsequent-use at much higher real indices
+(148/240, 152/244) via the full first-use → 0x07 announce → adopt
+sequence and got clean dispatch with **no** "node not in map" — the gap
+did not reproduce under the adoption-based protocol procedure. This
+suggests the original gap was specific to that sweep's methodology
+(forcing a raw Cecil-computed index directly, bypassing the real 0x07
+exchange) rather than a systemic protocol issue, but the root cause is
+not confirmed and is not chased further per `CLAUDE.md`'s standing
+guidance against re-deriving the static index formula.
+
+A separate, also-unresolved anomaly found by the same later test: a
+constant "-12" offset between the real wire-announced 0x07 index and
+`scripts/extract-method-indices.cs`'s (Cecil) computed index for the
+same method in the same build — reproducible across two different
+captures and both builds tested. This does not affect the adoption
+recipe itself (both sides always use each other's *announced* value,
+never a Cecil-computed one) but means the Cecil extractor's output
+should not be assumed to equal the real wire-announced index without
+cross-checking against a capture. See
+`docs/research/2026-07-13-large-delta-cross-assembly-test.md` for detail.
 
 ### 3.9 WriteCompressed\<uint32\>
 

@@ -812,6 +812,113 @@ def test_batch_index_decode_rejects_short():
     assert decode_batch_index(b'\x07\x00\x00') is None
 
 
+def test_batch_index_encode_rejects_out_of_range_index():
+    try:
+        encode_batch_index('RPC_Int', 256)
+        assert False, "expected ValueError for index >= 256"
+    except ValueError:
+        pass
+    try:
+        encode_batch_index('RPC_Int', 97)  # not a multiple of 4
+        assert False, "expected ValueError for non-multiple-of-4 index"
+    except ValueError:
+        pass
+
+
+def test_batch_index_encode_decode_roundtrip_extended_range():
+    for idx in (144, 160, 200, 252):
+        data, bits = encode_batch_index('RPC_Int', idx)
+        result = decode_batch_index(data)
+        assert result is not None, f"decode returned None for idx={idx}"
+        assert result['method_index'] == idx
+
+
+# Real msg_id 0x07 frames from captures/IndexSweep-20260712-235647.pcap and
+# captures/CrossBinary-20260628-004945.pcap, decoded bit-by-bit by hand to
+# derive the true field independent of this repo's own (previously wrong)
+# encoder/decoder. Sub-128 indices are end-aligned (last byte & 0x7F);
+# >=128 indices use a 5-bit quotient spread across non-contiguous tail-bit
+# positions (see encode_batch_index's docstring) — extended up to 252 and
+# verified against captures/LargeDelta-20260713-031337.pcap (see
+# INDEXSWEEP_LARGEDELTA_FRAMES below).
+# See docs/research/2026-07-13-batch-index-decoder-was-broken.md.
+INDEXSWEEP_SUB128_FRAMES = [
+    ('0700000024192764edab62abd08e5c', 92),   # RPC_Void
+    ('0700000020192764edab63a8ad60', 96),     # RPC_Int
+    ('0700000024192764edab62ac9435e4', 100),  # RPC_Float
+    ('0700000028192764edab63565e50a668', 104),  # RPC_String
+    ('0700000030192764edab62abc28b8cabc16c', 108),  # RPC_Vector3
+    ('0700000030192764edab62abb5b58c924170', 112),  # RPC_Quaternion
+    ('0700000028192764edab6350aec6d5f4', 116),  # RPC_Bytes
+    ('070000003c192764edab63a8ad59286bab2f285378', 120),  # RPC_IntFloatString
+    ('070000003c192764edab6262174c65fcec935632fc', 124),  # RPC_NetworkPlayer
+]
+
+INDEXSWEEP_EXTENDED_FRAMES = [
+    ('0700000040192764edab6262174c65faaf20a7519d0400', 128),  # RPC_NetworkViewID
+    ('0700000028192764edab62a92530ca8440', 132),  # RPC_Alpha
+    ('0700000024192764edab635016ca8480', 136),  # RPC_Beta
+    ('0700000028192764edab62ad369a3284c0', 140),  # RPC_Gamma
+]
+
+CROSSBINARY_FRAMES = [
+    ('0700000020192764edab63a8ad60', 96),      # RPC_Int, original build
+    ('0700000020192764edab63a8ad6c', 108),     # RPC_Int, patched build (+12)
+    ('0700000024192764edab62ac9435e4', 100),   # RPC_Float, original build
+    ('0700000024192764edab62ac9435f0', 112),   # RPC_Float, patched build (+12)
+    ('0700000028192764edab63565e50a668', 104),  # RPC_String, original build
+    ('0700000028192764edab63565e50a674', 116),  # RPC_String, patched build (+12)
+]
+
+# Real msg_id 0x07 frames from captures/LargeDelta-20260713-031337.pcap,
+# spanning method_index 160-232 — well past the old (wrong) 128-140
+# ceiling. Verifies the 5-bit non-contiguous quotient formula (extending
+# the representable range to 252). See
+# docs/plans/large-delta-cross-assembly-index-test.md.
+INDEXSWEEP_LARGEDELTA_FRAMES = [
+    ('0700000030192764edab62abb5b58c92410600', 160),  # RPC_Quaternion
+    ('0700000028192764edab6350aec6d58640', 164),      # RPC_Bytes
+    ('070000003c192764edab63a8ad59286bab2f28530740', 180),  # RPC_IntFloatString
+    ('070000003c192764edab6262174c65fcec93563287c0', 188),  # RPC_NetworkPlayer
+    ('0700000040192764edab6262174c65faaf20a7519d0940', 212),  # RPC_NetworkViewID
+    ('0700000028192764edab62a92530ca8980', 216),      # RPC_Alpha
+    ('0700000024192764edab635016ca8a40', 228),        # RPC_Beta
+    ('0700000028192764edab62ad369a328a80', 232),      # RPC_Gamma
+]
+
+
+def test_batch_index_decodes_real_indexsweep_sub128_frames():
+    for raw_hex, expected_index in INDEXSWEEP_SUB128_FRAMES:
+        decoded = decode_batch_index(bytes.fromhex(raw_hex))
+        assert decoded is not None, f"decode returned None for {raw_hex}"
+        assert decoded['method_index'] == expected_index, \
+            f"{raw_hex}: expected {expected_index}, got {decoded['method_index']}"
+
+
+def test_batch_index_decodes_real_indexsweep_extended_frames():
+    for raw_hex, expected_index in INDEXSWEEP_EXTENDED_FRAMES:
+        decoded = decode_batch_index(bytes.fromhex(raw_hex))
+        assert decoded is not None, f"decode returned None for {raw_hex}"
+        assert decoded['method_index'] == expected_index, \
+            f"{raw_hex}: expected {expected_index}, got {decoded['method_index']}"
+
+
+def test_batch_index_decodes_real_crossbinary_frames():
+    for raw_hex, expected_index in CROSSBINARY_FRAMES:
+        decoded = decode_batch_index(bytes.fromhex(raw_hex))
+        assert decoded is not None, f"decode returned None for {raw_hex}"
+        assert decoded['method_index'] == expected_index, \
+            f"{raw_hex}: expected {expected_index}, got {decoded['method_index']}"
+
+
+def test_batch_index_decodes_real_largedelta_frames():
+    for raw_hex, expected_index in INDEXSWEEP_LARGEDELTA_FRAMES:
+        decoded = decode_batch_index(bytes.fromhex(raw_hex))
+        assert decoded is not None, f"decode returned None for {raw_hex}"
+        assert decoded['method_index'] == expected_index, \
+            f"{raw_hex}: expected {expected_index}, got {decoded['method_index']}"
+
+
 def test_batch_index_method_index_override():
     data_override, bits_override = encode_rpc_subsequent(
         'RPC_Int', [42], mode=RPCMode.Server, target_view=0x2000,

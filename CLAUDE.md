@@ -126,3 +126,36 @@ Workflows require explicit opt-in — say "use a workflow" or "ultracode" when r
 - Research findings go in `docs/research/` with date-prefixed filenames
 - Plans in `docs/plans/`; completed plans move to `docs/plans/archive/`
 - Notes and informal findings in `docs/notes/`
+
+### Method-Index / Subsequent-Use Testing
+
+For subsequent-use RPC dispatch and method-index calculation work, consistently
+consider — and where possible test with — two genuinely different assemblies,
+under the explicit model that assembly A has no way of knowing assembly B's
+internal method indices, ordering, or count. A single shared build (or two
+builds differing by only a small, artificial index shift) can hide bugs that
+only appear when the two sides' static index tables have diverged for real
+reasons (different RPC method sets, different counts, different ordering).
+
+**Do not re-attempt deriving the static method-index formula from scratch.**
+A full day of dedicated investigation (see
+`docs/research/2026-06-27-method-index-investigation.md`) could not fully
+solve it — the `base_offset` term has a known counterexample and no general
+formula was found; only per-build empirical extraction (Cecil-based)
+proved reliable. (An earlier version of this note briefly asserted that
+"0x07 does not carry a usable dispatch index" — that was itself wrong,
+traced to a bit-layout bug in `decode_batch_index` (fixed; see
+`docs/research/2026-07-13-batch-index-decoder-was-broken.md`). Correctly
+decoded, 0x07 *does* carry the announcer's own real static dispatch
+index, and real Unity uses it via an adoption recipe confirmed
+direction-resolved against a real Unity↔Unity capture: the sender of a
+subsequent-use RPC encodes it using the index the *receiver* previously
+announced; the receiver decodes inbound subsequent-use via the index *it*
+previously announced. This does not change the guidance below — 0x07
+learning is a *runtime dispatch mechanism*, not a way to derive the
+static per-build formula itself; the formula remains unsolved and
+per-build empirical extraction remains the only reliable way to obtain
+a build's own table in the first place.) Treat re-deriving the formula as
+an absolute last resort, to be attempted only if it turns out to be
+strictly necessary even in the differing-assembly case — prefer
+per-build empirical extraction first.

@@ -511,11 +511,50 @@ function bytesToHex(bytes: Uint8Array): string {
   return hex;
 }
 
-/** Encode an RPC Batch Index message (msg_id 0x07). */
+/**
+ * Encode an RPC Batch Index message (msg_id 0x07).
+ *
+ * Wire layout (bit-exact against real Unity captures, verified
+ * 2026-07-13 — supersedes a prior version of this function that read/
+ * wrote 5 bits immediately after the hash with a <<2 shift; that field
+ * never matched a real dispatch index). After classGuid + methodHash,
+ * real frames always carry a fixed-width tail — 9 bits for
+ * methodIndex < 128, 17 bits for methodIndex >= 128 — ending in the
+ * frame's final byte:
+ *
+ * - index < 128: 1 leading bit (semantics unknown, observed both 0/1
+ *   in real captures, written as 0 here) + an 8-bit tail byte whose
+ *   low 7 bits ARE the index directly (no shift; real indices are
+ *   already multiples of 4, e.g. 96 = 0b1100000, so 7 bits suffice).
+ *   The tail byte's top bit is also unconfirmed/unused and written 0.
+ * - index >= 128: a 17-bit tail carries a 5-bit quotient
+ *   `(index - 128) / 4`, spread across NON-CONTIGUOUS bit positions
+ *   (0-indexed from the start of the 17-bit tail, MSB-first):
+ *     position 5 = quotient bit 4 (weight 16)
+ *     position 6 = constant flag, always 1 (semantics unknown)
+ *     position 7 = quotient bit 3 (weight 8)
+ *     position 8 = quotient bit 2 (weight 4)
+ *     position 9 = quotient bit 1 (weight 2)
+ *     position 10 = quotient bit 0 (weight 1)
+ *   positions 0-4 and 11-16 are unconfirmed/padding, written 0 here.
+ *   Verified 2026-07-13 against 12 real captured frames spanning
+ *   index 128-232 (see docs/research — large-delta cross-assembly
+ *   test). Extends the representable range to 128 + 31*4 = 252.
+ */
 export function encodeBatchIndex(
   methodName: string,
   methodIndex: number,
 ): { data: Uint8Array; bitLength: number } {
+  if (methodIndex < 0 || methodIndex % 4 !== 0) {
+    throw new Error(`methodIndex ${methodIndex} must be a non-negative multiple of 4`);
+  }
+  if (methodIndex >= 128 && (methodIndex - 128) / 4 > 31) {
+    throw new Error(
+      `methodIndex ${methodIndex} exceeds the confirmed batch-index tail ` +
+      'encoding\'s range (0-252) — the field width for larger indices is ' +
+      'unconfirmed by any real capture.');
+  }
+
   const { classGuid, methodHash } = getMethodId(methodName);
   const methodIdBytes = classGuid.length + methodHash.length;
   const methodIdBits = methodIdBytes * 8;
@@ -525,9 +564,26 @@ export function encodeBatchIndex(
   bs.writeBits(methodIdBits / 4, 31);
   bs.writeBytes(classGuid);
   bs.writeBytes(methodHash);
-  bs.writeBits(methodIndex >> 2, 5);
 
-  const totalBits = 8 + 31 + methodIdBits + 5;
+  let tailBits: number;
+  if (methodIndex < 128) {
+    bs.writeBit(0);
+    bs.writeBits(methodIndex, 8);
+    tailBits = 9;
+  } else {
+    const quotient = (methodIndex - 128) / 4;
+    bs.writeBits(0, 5);
+    bs.writeBit((quotient >> 4) & 1);
+    bs.writeBit(1);
+    bs.writeBit((quotient >> 3) & 1);
+    bs.writeBit((quotient >> 2) & 1);
+    bs.writeBit((quotient >> 1) & 1);
+    bs.writeBit(quotient & 1);
+    bs.writeBits(0, 6);
+    tailBits = 17;
+  }
+
+  const totalBits = 8 + 31 + methodIdBits + tailBits;
   // pad to byte boundary
   while (bs.pos % 8 !== 0) {
     bs.writeBit(0);
@@ -541,7 +597,12 @@ export interface DecodedBatchIndex {
   methodIndex: number;
 }
 
-/** Decode an RPC Batch Index message (msg_id 0x07). */
+/**
+ * Decode an RPC Batch Index message (msg_id 0x07).
+ *
+ * See encodeBatchIndex's doc comment for the bit-exact wire layout
+ * this mirrors (verified 2026-07-13 against real Unity captures).
+ */
 export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null {
   if (payload.length < 6 || payload[0] !== MSG_ID_BATCH_INDEX) return null;
 
@@ -558,7 +619,22 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
 
   bs.readBytes(6); // classGuid (skip)
   const methodHash = hashBytes > 0 ? bs.readBytes(hashBytes) : new Uint8Array(0);
-  const methodIndex = bs.readBits(5) << 2;
+
+  const totalBits = payload.length * 8;
+  const remaining = totalBits - bs.pos;
+  let methodIndex: number;
+  if (remaining === 9) {
+    const tail = bs.readBits(9);
+    methodIndex = tail & 0x7f;
+  } else if (remaining === 17) {
+    const tail = bs.readBits(17);
+    const quotient = (((tail >> 11) & 1) << 4) | (((tail >> 9) & 1) << 3) |
+      (((tail >> 8) & 1) << 2) | (((tail >> 7) & 1) << 1) | ((tail >> 6) & 1);
+    methodIndex = 128 + quotient * 4;
+  } else {
+    console.warn(`RakNet decode: batchIndex unexpected tail width (${remaining} bits), rejecting`);
+    return null;
+  }
 
   const hashHex = bytesToHex(methodHash);
   const methodName = lookupMethodByHash(hashHex);

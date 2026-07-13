@@ -652,8 +652,53 @@ def is_rpc(payload):
 def encode_batch_index(method_name, method_index):
     """Encode an RPC Batch Index message (msg_id 0x07).
 
+    Wire layout (bit-exact against real Unity captures). Supersedes two
+    prior, narrower versions of this function:
+    - a version that read/wrote 5 bits immediately after the hash with
+      a <<2 shift — that field never matched a real dispatch index, see
+      docs/research/2026-07-13-batch-index-decoder-was-broken.md.
+    - a version whose >=128 branch only extracted a 2-bit quotient from
+      the top of the final byte (range 128-140) — re-fit 2026-07-13
+      against docs/research/2026-07-13-large-delta-cross-assembly-
+      test.md's 26-frame, non-uniform-delta capture (real indices up to
+      244), which showed the quotient is actually 5 bits wide, spread
+      across non-contiguous tail-bit positions rather than packed at
+      the top of the byte. See that findings doc for the derivation.
+
+    After class_guid + method_hash, real frames always carry a
+    fixed-width tail — 9 bits for method_index < 128, 17 bits for
+    method_index >= 128 — ending in the frame's final byte:
+
+    - index < 128: 1 leading bit (semantics unknown, observed both 0/1
+      in real captures, written as 0 here) + an 8-bit tail byte whose
+      low 7 bits ARE the index directly (no shift; real indices are
+      already multiples of 4, e.g. 96 = 0b1100000, so 7 bits suffice).
+      The tail byte's top bit is also unconfirmed/unused and written 0.
+    - index >= 128: a 5-bit quotient `(index - 128) // 4` is spread
+      across tail-bit positions 5, 7, 8, 9, 10 (0-indexed from the
+      start of the 17-bit tail; MSB-first, i.e. position 5 = bit 4/
+      weight 16 down to position 10 = bit 0/weight 1). Position 6 sits
+      between two quotient bits and is a constant flag, always 1 in
+      every real frame observed (semantics unknown — written as 1
+      here). Positions 0-4 and 11-16 are unconfirmed/padding, written
+      0 here (position 0 or 1 was seen set in some real frames — cause
+      unknown, likely unrelated to the index itself). Confirmed
+      against real indices 128 through 244 (quotient 0-26); the field
+      has room for quotient up to 31 (index up to 252) but larger
+      values are unconfirmed by any real capture, so they raise rather
+      than silently truncate.
+
     Returns (payload_bytes, bit_length).
     """
+    if method_index < 0 or method_index % 4 != 0:
+        raise ValueError(f"method_index {method_index} must be a non-negative multiple of 4")
+    if method_index >= 128 and (method_index - 128) // 4 > 31:
+        raise ValueError(
+            f"method_index {method_index} exceeds the confirmed batch-index "
+            "tail encoding's range (0-252) — the field width for larger "
+            "indices is unconfirmed by any real capture; encoding it here "
+            "would silently produce a frame with no known real-Unity meaning.")
+
     class_guid, method_hash = get_method_id(method_name)
     method_id_bits = (len(class_guid) + len(method_hash)) * 8
 
@@ -662,9 +707,24 @@ def encode_batch_index(method_name, method_index):
     bs.write_bits(method_id_bits // 4, 31)
     bs.write_bytes(class_guid)
     bs.write_bytes(method_hash)
-    bs.write_bits(method_index >> 2, 5)
 
-    total_bits = 8 + 31 + method_id_bits + 5
+    if method_index < 128:
+        bs.write_bit(0)
+        bs.write_bits(method_index, 8)
+        tail_bits = 9
+    else:
+        quotient = (method_index - 128) // 4
+        bs.write_bits(0, 5)              # positions 0-4: unconfirmed/padding
+        bs.write_bit((quotient >> 4) & 1)  # position 5: quotient bit 4 (weight 16)
+        bs.write_bit(1)                    # position 6: constant flag
+        bs.write_bit((quotient >> 3) & 1)  # position 7: quotient bit 3 (weight 8)
+        bs.write_bit((quotient >> 2) & 1)  # position 8: quotient bit 2 (weight 4)
+        bs.write_bit((quotient >> 1) & 1)  # position 9: quotient bit 1 (weight 2)
+        bs.write_bit(quotient & 1)         # position 10: quotient bit 0 (weight 1)
+        bs.write_bits(0, 6)               # positions 11-16: padding
+        tail_bits = 17
+
+    total_bits = 8 + 31 + method_id_bits + tail_bits
     while bs.bit_length % 8 != 0:
         bs.write_bit(0)
 
@@ -673,6 +733,9 @@ def encode_batch_index(method_name, method_index):
 
 def decode_batch_index(payload):
     """Decode an RPC Batch Index message (msg_id 0x07).
+
+    See encode_batch_index's docstring for the bit-exact wire layout
+    this mirrors (verified 2026-07-13 against real Unity captures).
 
     Returns dict with 'method_name' and 'method_index', or None.
     """
@@ -692,7 +755,20 @@ def decode_batch_index(payload):
 
     bs.read_bytes(6)  # class_guid
     method_hash = bs.read_bytes(hash_bytes) if hash_bytes > 0 else b''
-    method_index = bs.read_bits(5) << 2
+
+    total_bits = len(payload) * 8
+    remaining = total_bits - bs.pos
+    last_byte = payload[-1]
+    if remaining == 9:
+        method_index = last_byte & 0x7F
+    elif remaining == 17:
+        tail = bs.read_bits(17)
+        quotient = (((tail >> 11) & 1) << 4) | (((tail >> 9) & 1) << 3) | \
+                   (((tail >> 8) & 1) << 2) | (((tail >> 7) & 1) << 1) | ((tail >> 6) & 1)
+        method_index = 128 + quotient * 4
+    else:
+        log.warning("RakNet decode: batchIndex unexpected tail width (%d bits), rejecting", remaining)
+        return None
 
     method_name = lookup_method_by_hash(method_hash.hex())
     return {'method_name': method_name, 'method_index': method_index}
