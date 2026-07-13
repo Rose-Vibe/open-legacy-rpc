@@ -41,6 +41,7 @@ export class UnityClient {
   private connectHandlers: Array<EventHandler<[]>> = [];
   private disconnectHandlers: Array<EventHandler<[string]>> = [];
   private rpcReceivedFirstUse: string[] = [];
+  private sentFirstUse = new Set<string>();
   private readonly epochNs = process.hrtime.bigint();
   private serverIndices = new Map<string, number>();
   private ourIndices = new Map<string, number>();
@@ -58,6 +59,7 @@ export class UnityClient {
 
     this.raknet.onDisconnect(() => {
       this.rpcReceivedFirstUse = [];
+      this.sentFirstUse.clear();
       this.serverIndices.clear();
       this.ourIndices.clear();
       this.ourIndexReverse.clear();
@@ -157,6 +159,16 @@ export class UnityClient {
     } else if (hasMethodIndex(methodName)) {
       result = encodeRpcSubsequent(opts);
     } else {
+      if (this.sentFirstUse.has(methodName)) {
+        console.warn(
+          `[UnityClient] Re-sending first-use RPC for "${methodName}" to the same peer ` +
+            `— method_index is not yet registered/learned for this method, so this send ` +
+            `repeats the (possibly colliding) method_tag instead of switching to ` +
+            `subsequent-use encoding. If this persists, the method is permanently stuck ` +
+            `on first-use encoding.`,
+        );
+      }
+      this.sentFirstUse.add(methodName);
       result = encodeRpcFirstUse(opts);
     }
 

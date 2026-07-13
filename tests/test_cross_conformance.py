@@ -9,7 +9,7 @@ from protocol.unity_protocol import (
     encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
     encode_batch_index, decode_batch_index,
     RPCMode, INTERNAL_RPC_CONSTANT, METHOD_TAG_MAP,
-    register_method_tag,
+    METHOD_INDEX_MAP, INDEX_TO_METHOD, register_method_indices,
 )
 
 
@@ -163,17 +163,21 @@ def test_subsequent_player_mode_matches_ts():
 def test_first_use_with_method_tag_matches_ts():
     entry = GOLDEN_TAG['fu_int_42_tag8']
     name, tag = entry['tag']
-    original_tag = METHOD_TAG_MAP.get(name)
-    register_method_tag(name, tag)
+    saved_tag = dict(METHOD_TAG_MAP)
+    saved_index = dict(METHOD_INDEX_MAP)
+    saved_reverse = dict(INDEX_TO_METHOD)
     try:
+        register_method_indices({name: tag})
         data, bits = _encode(entry, first_use=True)
         assert data.hex() == entry['hex']
         assert bits == entry['bits']
     finally:
-        if original_tag is not None:
-            METHOD_TAG_MAP[name] = original_tag
-        else:
-            METHOD_TAG_MAP.pop(name, None)
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
+        METHOD_INDEX_MAP.clear()
+        METHOD_INDEX_MAP.update(saved_index)
+        INDEX_TO_METHOD.clear()
+        INDEX_TO_METHOD.update(saved_reverse)
 
 
 def test_subsequent_others_mode_matches_ts():

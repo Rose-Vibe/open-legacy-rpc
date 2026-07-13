@@ -78,16 +78,6 @@ const METHOD_INDEX_MAP = new Map<string, number>();
 const INDEX_TO_METHOD = new Map<number, string>();
 const METHOD_TAG_MAP = new Map<string, number>();
 
-export function registerMethodTag(methodName: string, tag: number): void {
-  METHOD_TAG_MAP.set(methodName, tag);
-}
-
-export function registerMethodTags(tags: Record<string, number>): void {
-  for (const [name, tag] of Object.entries(tags)) {
-    METHOD_TAG_MAP.set(name, tag);
-  }
-}
-
 function registerLoaderAssembly(): void {
   const INTERFACE_METHODS = 7;
   const LOADER_RPC_RIDS: Record<string, number> = {

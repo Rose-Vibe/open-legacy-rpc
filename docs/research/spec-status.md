@@ -39,7 +39,7 @@ viewid_stride=50, constant_2=2, block_start=player*2-1, block_end=player*2.
 | 3.2 Subsequent-Use Format | Complete | 7-bit method index, fully decoded |
 | 3.2.1 Method Index Derivation | Complete | Formula: `(RID - 1 - iface_count) × 4` |
 | 3.3 First-Use Format | Complete | Huffman method hash, length indicator |
-| 3.3.1 Internal Metadata | **Mostly complete** | `method_tag` (4 bits) derivation unknown |
+| 3.3.1 Internal Metadata | Complete | `method_tag` (4 bits) = `method_index & 0x0F`; load-bearing, not cosmetic (see Known Issues) |
 | 3.3.2 Method Identifier Derivation | Complete | Huffman encoding algorithm fully reproduced |
 | 3.4 RPCMode Values | Complete | 6 modes, Player has +1 target bit |
 | 3.5 Parameter Encoding | Complete | All 8 param types implemented |
@@ -47,7 +47,12 @@ viewid_stride=50, constant_2=2, block_start=player*2-1, block_end=player*2.
 | 3.7 Huffman String Encoding | Complete | RakNet StringCompressor reproduced |
 
 **Known unknowns:**
-- `method_tag` (4 bits in first-use metadata): values 0/4/8/C observed, derivation unknown. Unity accepts 0, so non-blocking.
+- `method_tag` (4 bits in first-use metadata): derivation is known
+  (`method_index & 0x0F`), but the exact mechanism by which a real Unity
+  client uses the tag for dispatch is not confirmed. distance-server's
+  dispatch-matrix testing showed two RPC methods sharing a tag causing a
+  real Unity client to silently misdispatch first-use RPCs between them —
+  this is **not** cosmetic. See Known Issue #1 below.
 
 ### §4 State Sync Wire Format — COMPLETE
 
@@ -128,7 +133,6 @@ are not fully understood. None of these block Distance integration.
 
 | Location | Field | Width | Observed Values | Impact |
 |----------|-------|-------|-----------------|--------|
-| §3.3.1 | method_tag | 4 bits | 0, 4, 8, C | Cosmetic — Unity accepts 0 |
 | §4.1 | state sync constant | 16 bits | 0x0004 | Unknown purpose, always same |
 | §13.3 | prefab identifier | 133 bits | Opaque per-prefab | Cannot encode from name |
 | §13.4 | post-transform int32 | 32 bits | Always 1 | May be view count |
@@ -142,6 +146,7 @@ are not fully understood. None of these block Distance integration.
 | §2.3 (0x81) | fields 2–7 | All decoded (M10a): constants 1,0 + player_index + stride + constants 2 + block_start/end |
 | §1.4 | split packet reassembly | Tested up to 10KB payloads (M10c) |
 | §15 | RemoveRPCs / DestroyPlayerObjects | Server-side only, no wire messages (M10f) |
+| §3.3.1 | method_tag | Derivation confirmed (`method_index & 0x0F`); confirmed load-bearing on a real Unity client via distance-server's dispatch-matrix testing — see Known Issue #1 |
 
 ---
 
@@ -149,11 +154,29 @@ are not fully understood. None of these block Distance integration.
 
 Problems discovered during implementation that are worked around but not fully resolved.
 
-### 1. First-use RPC metadata (method_tag)
+### 1. First-use RPC metadata (method_tag) — collisions cause silent misdispatch
 
-We send `method_tag = 0` for all first-use RPCs. Unity accepts this, but
-the correct derivation is unknown. **Workaround:** always use subsequent-use
-encoding (pre-register method indices), which skips this field entirely.
+`method_tag = method_index & 0x0F` is derived correctly whenever a method's
+real index is registered via `registerMethodIndices`/`learnMethodIndex`. The
+risk is not the derivation — it's that the 4-bit tag space only has 4
+values (0, 4, 8, C), so any two methods can legitimately share a tag. Per
+distance-server's dispatch-matrix testing, a real Unity client can silently
+misdispatch a first-use RPC to a different method that shares its tag
+(observed: `RPC_BROADCAST_ALL` and `RPC_TARGETED` both tag 8, causing
+`RPC_BROADCAST_ALL` sends to route to `ReceiveTargetedEventServerToClient`
+instead). The exact caching mechanism on the Unity side is not confirmed.
+
+The library no longer allows registering a tag independent of a real
+method_index (`registerMethodTag`/`registerMethodTags` were removed —
+see `docs/plans/method-tag-collision-guard.md`), which closes off the
+observed failure mode: a hand-picked tag with no matching index, which both
+guesses wrong and permanently pins the method to first-use encoding. The
+library also warns when a method is sent first-use more than once to the
+same peer, which is the runtime symptom of an unregistered index.
+**Workaround:** always register real method indices (via
+`scripts/extract-method-indices.sh` against the game's Assembly-CSharp.dll)
+for every RPC method that will be sent to a real Unity client, rather than
+relying on the first-use path at all.
 
 ### 2. Scene-baked ViewID numbering is fragile
 

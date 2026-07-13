@@ -42,8 +42,6 @@ export {
   RPC_MODE_FROM_NAME,
   RPC_MODE_NAMES,
   INTERNAL_RPC_CONSTANT,
-  registerMethodTag,
-  registerMethodTags,
   registerMethodIndices,
   learnMethodIndex,
 } from './unity/rpc.js';

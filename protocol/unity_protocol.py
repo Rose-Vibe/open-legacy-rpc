@@ -239,19 +239,6 @@ def compute_method_tag(method_index):
     return method_index & 0x0F
 
 
-def register_method_tag(method_name, tag):
-    """Register a method_tag value for first-use RPC encoding.
-
-    method_tag is the bottom 4 bits of the method_index.
-    """
-    METHOD_TAG_MAP[method_name] = tag
-
-
-def register_method_tags(tags):
-    """Register multiple method tags from a dict of {name: tag}."""
-    METHOD_TAG_MAP.update(tags)
-
-
 def encode_view_id(view_id):
     """Encode a NetworkViewID as 48-bit big-endian bytes."""
     return struct.pack('>HI', (view_id >> 32) & 0xFFFF, view_id & 0xFFFFFFFF)

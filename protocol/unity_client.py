@@ -31,6 +31,7 @@ class UnityClient:
         self._epoch = time.monotonic()
         self._viewid_counter = 0
         self._server_indices = {}  # method_name -> server's index
+        self._sent_first_use = set()  # method names already sent first-use
         self._our_indices = {}  # method_name -> our assigned index
         self._our_index_reverse = {}  # our index -> method_name
         self._next_our_index = 4
@@ -87,6 +88,14 @@ class UnityClient:
                 target_view=target_view, relay=relay,
                 method_index=server_idx)
         else:
+            if method_name in self._sent_first_use:
+                log.warning(
+                    "Re-sending first-use RPC for %r to the same peer — "
+                    "method_index is not yet registered/learned for this method, so "
+                    "this send repeats the (possibly colliding) method_tag instead of "
+                    "switching to subsequent-use encoding. If this persists, the method "
+                    "is permanently stuck on first-use encoding.", method_name)
+            self._sent_first_use.add(method_name)
             payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay)

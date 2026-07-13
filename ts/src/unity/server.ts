@@ -57,6 +57,7 @@ export class UnityServer {
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private rpcReceivedFirstUse = new Map<string, string[]>();
+  private sentFirstUse = new Map<string, Set<string>>();
   private peerIndices = new Map<string, Map<string, number>>();
   private ourIndices = new Map<string, number>();
   private ourIndexReverse = new Map<number, string>();
@@ -100,6 +101,7 @@ export class UnityServer {
 
     this.raknet.onDisconnect((session) => {
       this.rpcReceivedFirstUse.delete(session.id);
+      this.sentFirstUse.delete(session.id);
       this.peerIndices.delete(session.id);
       for (const key of this.deltaState.keys()) {
         if (key.startsWith(session.id + ':')) {
@@ -274,6 +276,21 @@ export class UnityServer {
       } else if (hasMethodIndex(methodName)) {
         result = encodeRpcSubsequent(opts);
       } else {
+        let sent = this.sentFirstUse.get(session.id);
+        if (!sent) {
+          sent = new Set();
+          this.sentFirstUse.set(session.id, sent);
+        }
+        if (sent.has(methodName)) {
+          console.warn(
+            `[UnityServer] Re-sending first-use RPC for "${methodName}" to the same peer ` +
+              `— method_index is not yet registered/learned for this method, so this send ` +
+              `repeats the (possibly colliding) method_tag instead of switching to ` +
+              `subsequent-use encoding. If this persists, the method is permanently stuck ` +
+              `on first-use encoding.`,
+          );
+        }
+        sent.add(methodName);
         result = encodeRpcFirstUse(opts);
       }
     } catch (err) {

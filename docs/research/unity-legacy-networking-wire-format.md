@@ -379,10 +379,15 @@ a fixed reference point (19 bits before params = RPCMode(4) + constant(16) - 1).
 This is the same value as `total_bits - 121` in subsequent-use encoding.
 When the message is a relay (§3.7), add 5 to account for the relay padding.
 
-Unity accepts `method_tag = 0` when receiving first-use RPCs, so an encoder
-that always sets it to 0 will function correctly. The correct value is
-`method_index & 0x0F`, but since method_index may not be known when
-encoding first-use (see §3.2.1), zero is a safe default.
+Unity's *decoder* accepts `method_tag = 0` when receiving first-use RPCs —
+it will not reject the packet. That is not the same as being safe to
+ignore: distance-server's dispatch-matrix testing found that when two RPC
+methods share a tag, a real Unity client can silently misdispatch a
+first-use RPC to the wrong method's handler (the exact caching mechanism
+behind this is not confirmed, but the effect is reproducible). `method_tag`
+should always be derived from a real, registered `method_index`
+(`method_index & 0x0F`) rather than defaulted to 0 or hand-picked — see
+`docs/plans/method-tag-collision-guard.md` and spec-status.md Known Issue #1.
 
 ### 3.3.2 Method Identifier Derivation (GUID + Hash)
 

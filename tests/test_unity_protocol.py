@@ -5,13 +5,13 @@ from protocol.unity_protocol import (
     RPCMode, encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
     encode_state_sync, decode_state_sync, encode_view_id, METHOD_SIGNATURES,
     compute_method_id, method_hash_hex, class_guid_hex,
-    compute_method_index, METHOD_INDEX_MAP,
+    compute_method_index, METHOD_INDEX_MAP, INDEX_TO_METHOD,
     INTERNAL_RPCS, INTERNAL_RPC_CONSTANT,
     lookup_method_by_hash,
     encode_view_id_16, decode_view_id_16,
     encode_instantiate_group_flags, decode_instantiate_group_flags,
     encode_instantiate_params, decode_instantiate_params,
-    METHOD_TAG_MAP, register_method_tag, register_method_tags,
+    METHOD_TAG_MAP, register_method_indices,
     encode_batch_index, decode_batch_index, MSG_ID_BATCH_INDEX,
 )
 from protocol.bitstream import BitStream
@@ -623,9 +623,12 @@ def test_bytes_param_size_limit():
 
 
 def test_method_tag_registration():
-    """Registering a method_tag puts it into first-use encoding."""
-    register_method_tag('RPC_Int', 8)
+    """Registering a method_index derives the matching method_tag for first-use encoding."""
+    saved_tag = dict(METHOD_TAG_MAP)
+    saved_index = dict(METHOD_INDEX_MAP)
+    saved_reverse = dict(INDEX_TO_METHOD)
     try:
+        register_method_indices({'RPC_Int': 8})
         payload, bits = encode_rpc_first_use('RPC_Int', [42], target_view=0x2000)
         all_bits = ''.join(f'{b:08b}' for b in payload)
         guid, hash_val = compute_method_id('RPC_Int')
@@ -636,7 +639,12 @@ def test_method_tag_registration():
         assert int(tag_bits, 2) == 8, \
             f"Expected method_tag=8, got {int(tag_bits, 2)}"
     finally:
-        METHOD_TAG_MAP.pop('RPC_Int', None)
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
+        METHOD_INDEX_MAP.clear()
+        METHOD_INDEX_MAP.update(saved_index)
+        INDEX_TO_METHOD.clear()
+        INDEX_TO_METHOD.update(saved_reverse)
 
 
 def test_method_tag_defaults_to_zero():
@@ -652,15 +660,22 @@ def test_method_tag_defaults_to_zero():
     assert int(tag_bits, 2) == 0
 
 
-def test_register_method_tags_bulk():
-    """register_method_tags registers multiple tags at once."""
-    register_method_tags({'RPC_Alpha': 4, 'RPC_Beta': 12})
+def test_register_method_indices_bulk_derives_tags():
+    """register_method_indices derives method_tag for multiple methods at once."""
+    saved_tag = dict(METHOD_TAG_MAP)
+    saved_index = dict(METHOD_INDEX_MAP)
+    saved_reverse = dict(INDEX_TO_METHOD)
     try:
+        register_method_indices({'RPC_Alpha': 4, 'RPC_Beta': 12})
         assert METHOD_TAG_MAP['RPC_Alpha'] == 4
         assert METHOD_TAG_MAP['RPC_Beta'] == 12
     finally:
-        METHOD_TAG_MAP.pop('RPC_Alpha', None)
-        METHOD_TAG_MAP.pop('RPC_Beta', None)
+        METHOD_TAG_MAP.clear()
+        METHOD_TAG_MAP.update(saved_tag)
+        METHOD_INDEX_MAP.clear()
+        METHOD_INDEX_MAP.update(saved_index)
+        INDEX_TO_METHOD.clear()
+        INDEX_TO_METHOD.update(saved_reverse)
 
 
 def test_u64_timestamp_high_values():

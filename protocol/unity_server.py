@@ -36,6 +36,7 @@ class UnityServer:
         self._disconnect_handler = None
         self._epoch = time.monotonic()
         self._peer_indices = {}  # addr -> {method_name: index}
+        self._sent_first_use = {}  # addr -> set of method names already sent first-use
         self._our_indices = {}  # method_name -> our assigned index
         self._our_index_reverse = {}  # our index -> method_name
         self._next_our_index = 4
@@ -70,6 +71,7 @@ class UnityServer:
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
             self._peer_indices[addr] = {}
+            self._sent_first_use[addr] = set()
             self._send_groups[addr] = set()
             self._recv_groups[addr] = set()
             self._allocated_views[addr] = []
@@ -81,6 +83,7 @@ class UnityServer:
         """handler(addr, player_index)"""
         def wrapped(addr, player_idx):
             self._peer_indices.pop(addr, None)
+            self._sent_first_use.pop(addr, None)
             self._send_groups.pop(addr, None)
             self._recv_groups.pop(addr, None)
             for vid in self._allocated_views.pop(addr, []):
@@ -267,6 +270,15 @@ class UnityServer:
                 target_view=target_view, relay=relay,
                 method_index=peer_idx)
         else:
+            sent = self._sent_first_use.setdefault(addr, set())
+            if method_name in sent:
+                log.warning(
+                    "Re-sending first-use RPC for %r to the same peer %s — "
+                    "method_index is not yet registered/learned for this method, so "
+                    "this send repeats the (possibly colliding) method_tag instead of "
+                    "switching to subsequent-use encoding. If this persists, the method "
+                    "is permanently stuck on first-use encoding.", method_name, addr)
+            sent.add(method_name)
             payload, bits = encode_rpc_first_use(
                 method_name, params, view_id, uptime_ms, mode,
                 target_view=target_view, relay=relay)
