@@ -69,7 +69,7 @@ the architecture doc and the roadmap.
 
 ### Step 2: Plan Review
 
-Spawn an Opus-model agent to review the plan. The reviewer should:
+Spawn a Fable-model agent to review the plan. The reviewer should:
 
 - Check consistency with the architecture doc
 - Identify missing edge cases or exit criteria
