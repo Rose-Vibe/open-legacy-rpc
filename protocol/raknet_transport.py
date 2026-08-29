@@ -17,6 +17,7 @@ OFFLINE_MAGIC = bytes([
 ])
 
 MTU_SIZE = 1464
+MAX_FRAGMENT_PAYLOAD = 1200
 
 
 class Reliability(IntEnum):
@@ -349,6 +350,7 @@ class RakNetPeer:
         self._split_assembler = SplitPacketAssembler()
         self._pending_acks = []
         self._unacked_reliable = {}  # datagram_seq -> (msg, send_time)
+        self._next_split_id = 0
 
     def get_timestamp(self):
         return int((time.monotonic() - self._connect_time) * 1000) & 0xFFFFFFFF
@@ -361,7 +363,18 @@ class RakNetPeer:
 
     def send_message(self, payload, reliability=Reliability.RELIABLE_ORDERED,
                      ordering_channel=0, bit_length=None):
-        """Send a Unity-layer message with the specified reliability."""
+        """Send a Unity-layer message with the specified reliability.
+
+        Payloads larger than MAX_FRAGMENT_PAYLOAD are automatically split into
+        multiple fragments (each sent in its own datagram) so they fit within
+        the MTU without triggering IP fragmentation that NATs/firewalls drop.
+        All fragments share one ordering index; each gets its own
+        reliable_msg_number so they can be individually retransmitted.
+        """
+        if len(payload) > MAX_FRAGMENT_PAYLOAD:
+            self._send_split(payload, reliability, ordering_channel)
+            return
+
         msg = EncapsulatedMessage(payload, reliability)
         msg.bit_length = bit_length if bit_length is not None else len(payload) * 8
 
@@ -386,6 +399,44 @@ class RakNetPeer:
 
         if msg.is_reliable:
             self._unacked_reliable[seq] = (msg, time.monotonic())
+
+    def _send_split(self, payload, reliability, ordering_channel):
+        """Split a large payload into fragments and send each in its own datagram."""
+        chunks = [payload[i:i + MAX_FRAGMENT_PAYLOAD]
+                  for i in range(0, len(payload), MAX_FRAGMENT_PAYLOAD)]
+        count = len(chunks)
+        split_id = self._next_split_id
+        self._next_split_id += 1
+
+        # Claim one ordering index for all fragments (or None if unordered).
+        ordering_index = None
+        if EncapsulatedMessage(b'', reliability).is_ordered:
+            ch = ordering_channel
+            is_sequenced = reliability in (Reliability.UNRELIABLE_SEQUENCED, Reliability.RELIABLE_SEQUENCED)
+            counter = self._sequencing_index if is_sequenced else self._ordering_index
+            if ch not in counter:
+                counter[ch] = 0
+            ordering_index = counter[ch]
+            counter[ch] += 1
+
+        for i, chunk in enumerate(chunks):
+            msg = EncapsulatedMessage(chunk, reliability)
+            msg.bit_length = len(chunk) * 8
+            msg.split_packet_count = count
+            msg.split_packet_id = split_id
+            msg.split_packet_index = i
+            if ordering_index is not None:
+                msg.ordering_index = ordering_index
+                msg.ordering_channel = ordering_channel
+            if msg.is_reliable:
+                msg.reliable_msg_number = self._reliable_send_num
+                self._reliable_send_num += 1
+            seq = self._send_seq
+            datagram = pack_datagram(seq, [msg], self.get_timestamp())
+            self._send_seq = (self._send_seq + 1) & 0xFFFFFF
+            self.send_raw(datagram)
+            if msg.is_reliable:
+                self._unacked_reliable[seq] = (msg, time.monotonic())
 
     def send_unreliable(self, payload, ordering_channel=0):
         self.send_message(payload, Reliability.UNRELIABLE, ordering_channel)

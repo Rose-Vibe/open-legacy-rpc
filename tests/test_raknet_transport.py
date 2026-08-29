@@ -1,7 +1,10 @@
+import socket as _sock_mod
+
 from protocol.raknet_transport import (
     EncapsulatedMessage, Reliability, pack_encapsulated, unpack_encapsulated,
     pack_datagram, pack_ack, unpack_datagram, encode_address, decode_address,
-    SplitPacketAssembler, encode_u24_le, decode_u24_le,
+    SplitPacketAssembler, encode_u24_le, decode_u24_le, RakNetPeer,
+    MAX_FRAGMENT_PAYLOAD,
 )
 
 
@@ -205,14 +208,110 @@ def test_parse_known_capture_datagram():
     assert m.payload == bytes.fromhex('8300000001')
 
 
-def test_ordering_index_separate_for_ordered_vs_sequenced():
-    """ORDERED and SEQUENCED use independent index counters on the same channel."""
-    import socket as sock_mod
-    from protocol.raknet_transport import RakNetPeer
-    s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_DGRAM)
+def _make_peer():
+    s = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_DGRAM)
     s.setblocking(False)
     s.bind(('127.0.0.1', 0))
-    peer = RakNetPeer(s, ('127.0.0.1', 9999))
+    return RakNetPeer(s, ('127.0.0.1', 9999)), s
+
+
+def test_send_large_payload_splits_into_fragments():
+    """Payloads > MAX_FRAGMENT_PAYLOAD are split; each fragment is one datagram."""
+    peer, s = _make_peer()
+    big = bytes(range(256)) * 10  # 2560 bytes — more than two fragments
+    peer.send_message(big, Reliability.RELIABLE_ORDERED)
+
+    # Three fragments expected: 1200 + 1200 + 160
+    assert peer._send_seq == 3
+
+    # Read back the raw datagrams sent to the (loopback) socket
+    receiver = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_DGRAM)
+    receiver.bind(('127.0.0.1', peer.remote_addr[1]))
+    # Re-send via a fresh peer aimed at receiver
+    peer2, s2 = _make_peer()
+    peer2.remote_addr = ('127.0.0.1', receiver.getsockname()[1])
+    peer2.send_message(big, Reliability.RELIABLE_ORDERED)
+
+    frames = []
+    for _ in range(3):
+        data, _ = receiver.recvfrom(65535)
+        result = unpack_datagram(data)
+        assert result[0] == 'data'
+        frames.append(result[3][0])  # single message per datagram
+
+    assert frames[0].split_packet_count == 3
+    assert frames[0].split_packet_index == 0
+    assert frames[1].split_packet_index == 1
+    assert frames[2].split_packet_index == 2
+    assert all(f.split_packet_id == frames[0].split_packet_id for f in frames)
+
+    assert len(frames[0].payload) == MAX_FRAGMENT_PAYLOAD
+    assert len(frames[1].payload) == MAX_FRAGMENT_PAYLOAD
+    assert len(frames[2].payload) == len(big) - 2 * MAX_FRAGMENT_PAYLOAD
+
+    assert frames[0].reliable_msg_number == 0
+    assert frames[1].reliable_msg_number == 1
+    assert frames[2].reliable_msg_number == 2
+
+    # All fragments share one ordering index
+    assert frames[0].ordering_index == 0
+    assert frames[1].ordering_index == 0
+    assert frames[2].ordering_index == 0
+
+    receiver.close()
+    s.close()
+    s2.close()
+
+
+def test_send_large_payload_reassembles_correctly():
+    """Fragments sent by send_message reassemble to the original payload."""
+    sender, s_send = _make_peer()
+    receiver_sock = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_DGRAM)
+    receiver_sock.bind(('127.0.0.1', 0))
+    receiver_sock.setblocking(False)
+    sender.remote_addr = ('127.0.0.1', receiver_sock.getsockname()[1])
+
+    big = bytes(i & 0xFF for i in range(2500))
+    sender.send_message(big, Reliability.RELIABLE_ORDERED)
+
+    receiver_peer, s_recv = _make_peer()
+    reassembled = []
+    for _ in range(3):
+        data, _ = receiver_sock.recvfrom(65535)
+        msgs = receiver_peer.handle_received(data)
+        reassembled.extend(msgs)
+
+    assert len(reassembled) == 1
+    assert reassembled[0].payload == big
+
+    receiver_sock.close()
+    s_send.close()
+    s_recv.close()
+
+
+def test_payload_at_threshold_not_split():
+    """Payloads exactly at MAX_FRAGMENT_PAYLOAD are sent unfragmented."""
+    peer, s = _make_peer()
+    exact = bytes(MAX_FRAGMENT_PAYLOAD)
+    peer.send_message(exact, Reliability.RELIABLE_ORDERED)
+    assert peer._send_seq == 1  # one datagram
+    assert peer._unacked_reliable[0][0].split_packet_count is None
+    s.close()
+
+
+def test_split_ordering_index_not_double_incremented():
+    """A split message consumes exactly one ordering index."""
+    peer, s = _make_peer()
+    peer.send_message(bytes(10), Reliability.RELIABLE_ORDERED)      # ordering_index 0
+    peer.send_message(bytes(2500), Reliability.RELIABLE_ORDERED)    # ordering_index 1 (split)
+    peer.send_message(bytes(10), Reliability.RELIABLE_ORDERED)      # ordering_index 2
+    assert peer._ordering_index[0] == 3
+    s.close()
+
+
+def test_ordering_index_separate_for_ordered_vs_sequenced():
+    """ORDERED and SEQUENCED use independent index counters on the same channel."""
+    peer, s = _make_peer()
 
     # Send interleaved RELIABLE_ORDERED and UNRELIABLE_SEQUENCED on channel 0
     peer.send_message(b'\x01', Reliability.RELIABLE_ORDERED, ordering_channel=0)
