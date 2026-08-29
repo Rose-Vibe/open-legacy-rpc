@@ -67,11 +67,12 @@ export class MasterClient {
   async connect(
     host = '127.0.0.1',
     port = 23466,
-    opts?: { timeout?: number; localAddress?: string },
+    opts?: { timeout?: number; localAddress?: string; mtu?: number },
   ): Promise<void> {
     await this.client.connect(host, port, {
       timeout: opts?.timeout ?? 5000,
       ...(opts?.localAddress !== undefined ? { localAddress: opts.localAddress } : {}),
+      ...(opts?.mtu !== undefined ? { mtu: opts.mtu } : {}),
     });
   }
 

@@ -510,6 +510,7 @@ export class RakNetClient {
   private localPort = 0;
   private guid: Uint8Array;
   private _password = '';
+  private mtuSize = MTU_SIZE;
   private messageHandlers: Array<EventHandler<[IncomingMessage]>> = [];
   private disconnectHandlers: Array<EventHandler<[]>> = [];
   private connectHandlers: Array<EventHandler<[]>> = [];
@@ -539,11 +540,12 @@ export class RakNetClient {
   async connect(
     host: string,
     port: number,
-    options?: { password?: string; timeout?: number; localAddress?: string },
+    options?: { password?: string; timeout?: number; localAddress?: string; mtu?: number },
   ): Promise<void> {
     this.serverHost = host;
     this.serverPort = port;
     this._password = options?.password ?? '';
+    this.mtuSize = options?.mtu ?? MTU_SIZE;
     const timeout = options?.timeout ?? 5000;
 
     this.socket.onMessage((data, _remote) => {
@@ -708,7 +710,7 @@ export class RakNetClient {
   }
 
   private sendOpenConnectionRequest(): void {
-    const buf = new Uint8Array(MTU_SIZE);
+    const buf = new Uint8Array(this.mtuSize);
     buf[0] = 0x09;
     buf[1] = RAKNET_PROTOCOL_VERSION;
     buf.set(this.guid, 2);
