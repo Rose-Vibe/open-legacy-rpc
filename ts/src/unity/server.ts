@@ -43,6 +43,10 @@ export interface UnityServerOptions {
   enforceViewIdOwnership?: boolean;
   /** Called when an RPC is received from a client that doesn't own the targetView. */
   onViewIdViolation?: (session: ClientSession, methodName: string, viewId: ViewId) => void;
+  /** Local IP address to bind all server sockets to. Defaults to '0.0.0.0' (all interfaces). */
+  bindAddress?: string;
+  /** Multiple local IPs to bind on every port. Overrides `bindAddress` when set. */
+  listenInterfaces?: string[];
 }
 
 export interface StateSyncMessage extends DecodedStateSync {
@@ -78,6 +82,8 @@ export class UnityServer {
       passwordPredicate?: (session: ClientSession, password: string) => boolean;
       viewIdStride?: number;
       epochNs?: bigint;
+      bindAddress?: string;
+      listenInterfaces?: string[];
     } = {};
     if (options.port !== undefined) rakOpts.port = options.port;
     if (options.ports !== undefined) rakOpts.ports = options.ports;
@@ -85,6 +91,8 @@ export class UnityServer {
     if (options.passwordPredicate !== undefined) rakOpts.passwordPredicate = options.passwordPredicate;
     if (options.viewIdStride !== undefined) rakOpts.viewIdStride = options.viewIdStride;
     if (options.epochNs !== undefined) rakOpts.epochNs = options.epochNs;
+    if (options.bindAddress !== undefined) rakOpts.bindAddress = options.bindAddress;
+    if (options.listenInterfaces !== undefined) rakOpts.listenInterfaces = options.listenInterfaces;
     this.raknet = new RakNetServer(socket, rakOpts);
     this.epochNs = options.epochNs ?? process.hrtime.bigint();
     this.sendBatchIndices = options.sendBatchIndices ?? true;
@@ -429,7 +437,7 @@ export class UnityServer {
     return this.raknet.getSessionsByPort(port);
   }
 
-  getSocket(port: number): UdpSocket | undefined {
-    return this.raknet.getSocket(port);
+  getSocket(port: number, address?: string): UdpSocket | undefined {
+    return this.raknet.getSocket(port, address);
   }
 }

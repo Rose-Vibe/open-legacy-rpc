@@ -75,13 +75,27 @@ export interface RakNetServerOptions {
   epochNs?: bigint;
   /** Idle time (ms, no datagram received) before a session is evicted as dead. Default 10000. */
   sessionTimeoutMs?: number;
+  /** Local IP address to bind all server sockets to. Defaults to '0.0.0.0' (all interfaces). */
+  bindAddress?: string;
+  /**
+   * Local IP addresses to bind the server sockets to. Overrides `bindAddress` when set.
+   * Each address binds a separate socket on every port, so clients can connect on any of them.
+   * Useful when you want to listen on 0.0.0.0 but also register with the master server from a
+   * specific interface (see `masterServerListenInterface` in the brain config).
+   */
+  listenInterfaces?: string[];
 }
 
 type EventHandler<T extends unknown[]> = (...args: T) => void;
 
 export class RakNetServer {
-  private sockets: Map<number, UdpSocket> = new Map();
+  /** Keyed by `${address}:${port}`. One entry per (address, port) pair. */
+  private sockets: Map<string, UdpSocket> = new Map();
   private portAccepting: Map<number, boolean> = new Map();
+
+  private static socketKey(address: string, port: number): string {
+    return `${address}:${String(port)}`;
+  }
   private sessionSockets: Map<string, UdpSocket> = new Map();
   /** Datagram routing table, keyed by addrKey(remote). Internal only. */
   private sessionsByAddr: Map<string, ClientSession> = new Map();
@@ -93,6 +107,7 @@ export class RakNetServer {
   private readonly passwordPredicate: ((session: ClientSession, password: string) => boolean) | null;
   private readonly viewIdStride: number;
   private readonly sessionTimeoutMs: number;
+  private readonly listenInterfaces: string[];
   private readonly initialPorts: number[];
   private connectHandlers: Array<EventHandler<[ClientSession]>> = [];
   private disconnectHandlers: Array<EventHandler<[ClientSession]>> = [];
@@ -115,6 +130,7 @@ export class RakNetServer {
       this.viewIdStride = options.viewIdStride ?? 50;
       this.epochNs = options.epochNs ?? process.hrtime.bigint();
       this.sessionTimeoutMs = options.sessionTimeoutMs ?? 10_000;
+      this.listenInterfaces = options.listenInterfaces ?? [options.bindAddress ?? '0.0.0.0'];
     } else {
       const opts = socketOrOptions as RakNetServerOptions;
       this.initialPorts = opts.ports ?? (opts.port !== undefined ? [opts.port] : []);
@@ -123,6 +139,7 @@ export class RakNetServer {
       this.viewIdStride = opts.viewIdStride ?? 50;
       this.epochNs = opts.epochNs ?? process.hrtime.bigint();
       this.sessionTimeoutMs = opts.sessionTimeoutMs ?? 10_000;
+      this.listenInterfaces = opts.listenInterfaces ?? [opts.bindAddress ?? '0.0.0.0'];
     }
   }
 
@@ -130,12 +147,26 @@ export class RakNetServer {
     if (this.externalSocket) {
       if (this.initialPorts.length > 0) {
         const port = this.initialPorts[0]!;
-        this.sockets.set(port, this.externalSocket);
+        const primaryAddress = this.listenInterfaces[0] ?? '0.0.0.0';
+        this.sockets.set(RakNetServer.socketKey(primaryAddress, port), this.externalSocket);
         this.portAccepting.set(port, true);
         this.externalSocket.onMessage((data, remote) => {
           this.handlePacket(data, remote, this.externalSocket!);
         });
-        await this.externalSocket.bind(port);
+        await this.externalSocket.bind(port, primaryAddress);
+        // Bind additional interfaces on the same port with fresh sockets.
+        if (this.listenInterfaces.length > 1) {
+          const { UdpSocket: SocketClass } = await import('./socket.js');
+          for (let i = 1; i < this.listenInterfaces.length; i++) {
+            const address = this.listenInterfaces[i]!;
+            const sock = new SocketClass();
+            sock.onMessage((data, remote) => {
+              this.handlePacket(data, remote, sock);
+            });
+            await sock.bind(port, address);
+            this.sockets.set(RakNetServer.socketKey(address, port), sock);
+          }
+        }
       }
       for (let i = 1; i < this.initialPorts.length; i++) {
         await this.addPort(this.initialPorts[i]!);
@@ -205,42 +236,57 @@ export class RakNetServer {
   }
 
   async addPort(port: number): Promise<void> {
-    if (this.sockets.has(port)) {
+    if (this.portAccepting.has(port)) {
       throw new Error(`Port ${port} is already bound`);
     }
     const { UdpSocket: SocketClass } = await import('./socket.js');
-    const sock = new SocketClass();
-    sock.onMessage((data, remote) => {
-      this.handlePacket(data, remote, sock);
-    });
-    await sock.bind(port);
-    this.sockets.set(port, sock);
+    for (const address of this.listenInterfaces) {
+      const sock = new SocketClass();
+      sock.onMessage((data, remote) => {
+        this.handlePacket(data, remote, sock);
+      });
+      await sock.bind(port, address);
+      this.sockets.set(RakNetServer.socketKey(address, port), sock);
+    }
     this.portAccepting.set(port, true);
   }
 
   async removePort(port: number, options: { mode: PortRemoveMode }): Promise<void> {
     void options.mode;
-    const sock = this.sockets.get(port);
-    if (!sock) {
+    if (!this.portAccepting.has(port)) {
       throw new Error(`Port ${port} is not bound`);
     }
     for (const session of this.getSessionsByPort(port)) {
       this.disconnectClient(session);
     }
-    this.sockets.delete(port);
+    const suffix = `:${String(port)}`;
+    const toClose: UdpSocket[] = [];
+    for (const [key, sock] of this.sockets) {
+      if (key.endsWith(suffix)) {
+        toClose.push(sock);
+        this.sockets.delete(key);
+      }
+    }
     this.portAccepting.delete(port);
-    await sock.close();
+    for (const sock of toClose) await sock.close();
   }
 
   setPortAccepting(port: number, accepting: boolean): void {
-    if (!this.sockets.has(port)) {
+    if (!this.portAccepting.has(port)) {
       throw new Error(`Port ${port} is not bound`);
     }
     this.portAccepting.set(port, accepting);
   }
 
-  getSocket(port: number): UdpSocket | undefined {
-    return this.sockets.get(port);
+  getSocket(port: number, address?: string): UdpSocket | undefined {
+    if (address !== undefined) {
+      return this.sockets.get(RakNetServer.socketKey(address, port));
+    }
+    const suffix = `:${String(port)}`;
+    for (const [key, sock] of this.sockets) {
+      if (key.endsWith(suffix)) return sock;
+    }
+    return undefined;
   }
 
   getSessionsByPort(port: number): ClientSession[] {
@@ -387,8 +433,11 @@ export class RakNetServer {
   }
 
   private getSocketPort(sock: UdpSocket): number {
-    for (const [port, s] of this.sockets) {
-      if (s === sock) return port;
+    for (const [key, s] of this.sockets) {
+      if (s === sock) {
+        const colonIdx = key.lastIndexOf(':');
+        return colonIdx >= 0 ? parseInt(key.slice(colonIdx + 1), 10) : 0;
+      }
     }
     return 0;
   }
