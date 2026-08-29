@@ -9,7 +9,8 @@ from protocol.unity_protocol import (
     compute_method_id, method_hash_hex, class_guid_hex,
     compute_method_index, METHOD_INDEX_MAP, INDEX_TO_METHOD,
     INTERNAL_RPCS, INTERNAL_RPC_CONSTANT,
-    lookup_method_by_hash,
+    lookup_method_by_hash, lookup_method_by_identifier,
+    register_method_names,
     encode_view_id_16, decode_view_id_16,
     encode_instantiate_group_flags, decode_instantiate_group_flags,
     encode_instantiate_params, decode_instantiate_params,
@@ -453,6 +454,36 @@ def test_internal_rpc_lookup():
     _, hash_val = compute_method_id('__RPCNetworkInstantiate')
     name = lookup_method_by_hash(hash_val.hex())
     assert name == '__RPCNetworkInstantiate'
+
+
+def test_guid_hash_lookup_disambiguates_same_hash():
+    """Two methods with identical methodHash but different classGuid resolve correctly.
+
+    SubmitServerNetworkTimeSync and ReceiveServerNetworkTimeSync are real
+    distance-server methods that share the same hash bytes. Before
+    lookup_method_by_identifier, lookup_method_by_hash returned whichever
+    was registered first, causing silent misdispatch on batch-index decode.
+    """
+    register_method_names(['SubmitServerNetworkTimeSync', 'ReceiveServerNetworkTimeSync'])
+
+    submit_guid, submit_hash = compute_method_id('SubmitServerNetworkTimeSync')
+    receive_guid, receive_hash = compute_method_id('ReceiveServerNetworkTimeSync')
+
+    assert submit_hash.hex() == receive_hash.hex(), "test requires same hash"
+    assert submit_guid.hex() != receive_guid.hex(), "test requires different guid"
+
+    assert lookup_method_by_identifier(submit_guid.hex(), submit_hash.hex()) == 'SubmitServerNetworkTimeSync'
+    assert lookup_method_by_identifier(receive_guid.hex(), receive_hash.hex()) == 'ReceiveServerNetworkTimeSync'
+
+    # encode + decode batch-index round-trip resolves the right name via guid+hash
+    payload_submit, _ = encode_batch_index('SubmitServerNetworkTimeSync', 104)
+    payload_receive, _ = encode_batch_index('ReceiveServerNetworkTimeSync', 80)
+    decoded_submit = decode_batch_index(payload_submit)
+    decoded_receive = decode_batch_index(payload_receive)
+    assert decoded_submit['method_name'] == 'SubmitServerNetworkTimeSync'
+    assert decoded_submit['method_index'] == 104
+    assert decoded_receive['method_name'] == 'ReceiveServerNetworkTimeSync'
+    assert decoded_receive['method_index'] == 80
 
 
 def test_password_in_connection_request():
