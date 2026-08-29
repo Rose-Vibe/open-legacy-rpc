@@ -321,4 +321,98 @@ describe('ReliabilityLayer', () => {
       expect(retransmits).toHaveLength(0);
     });
   });
+
+  describe('auto-fragmentation', () => {
+    it('splits oversized payloads into multiple frames', () => {
+      const rl = makeReliability();
+      const big = new Uint8Array(2500);
+      for (let i = 0; i < big.length; i++) big[i] = i & 0xff;
+
+      rl.queueOutgoing(big, Reliability.RELIABLE_ORDERED, 0);
+      const packets = rl.getOutgoingPackets();
+
+      expect(packets.length).toBe(3);
+
+      const frames = packets.map((p) => {
+        const parsed = parsePacket(p);
+        if (parsed.type !== 'data') throw new Error('expected data');
+        return parsed.frames[0]!;
+      });
+
+      for (const f of frames) {
+        expect(f.splitPacketCount).toBe(3);
+        expect(f.splitPacketId).toBe(0);
+        expect(f.orderingIndex).toBe(0);
+        expect(f.orderingChannel).toBe(0);
+      }
+
+      expect(frames[0]!.splitPacketIndex).toBe(0);
+      expect(frames[1]!.splitPacketIndex).toBe(1);
+      expect(frames[2]!.splitPacketIndex).toBe(2);
+
+      expect(frames[0]!.payload.length).toBe(1200);
+      expect(frames[1]!.payload.length).toBe(1200);
+      expect(frames[2]!.payload.length).toBe(100);
+
+      expect(frames[0]!.reliableMsgNumber).toBe(0);
+      expect(frames[1]!.reliableMsgNumber).toBe(1);
+      expect(frames[2]!.reliableMsgNumber).toBe(2);
+    });
+
+    it('does not split payloads at or below the fragment threshold', () => {
+      const rl = makeReliability();
+      const exact = new Uint8Array(ReliabilityLayer.MAX_FRAGMENT_PAYLOAD);
+      rl.queueOutgoing(exact, Reliability.RELIABLE_ORDERED, 0);
+      const packets = rl.getOutgoingPackets();
+      expect(packets).toHaveLength(1);
+
+      const parsed = parsePacket(packets[0]!);
+      if (parsed.type !== 'data') throw new Error('expected data');
+      expect(parsed.frames[0]!.splitPacketCount).toBeNull();
+      expect(parsed.frames[0]!.payload.length).toBe(1200);
+    });
+
+    it('shares one ordering index across all fragments', () => {
+      const rl = makeReliability();
+      rl.queueOutgoing(new Uint8Array(10), Reliability.RELIABLE_ORDERED, 0);
+      rl.queueOutgoing(new Uint8Array(2500), Reliability.RELIABLE_ORDERED, 0);
+      rl.queueOutgoing(new Uint8Array(10), Reliability.RELIABLE_ORDERED, 0);
+
+      const packets = rl.getOutgoingPackets();
+      const frames = packets.map((p) => {
+        const parsed = parsePacket(p);
+        if (parsed.type !== 'data') throw new Error('expected data');
+        return parsed.frames[0]!;
+      });
+
+      expect(frames[0]!.orderingIndex).toBe(0);
+      expect(frames[0]!.splitPacketCount).toBeNull();
+
+      expect(frames[1]!.orderingIndex).toBe(1);
+      expect(frames[2]!.orderingIndex).toBe(1);
+      expect(frames[3]!.orderingIndex).toBe(1);
+
+      expect(frames[4]!.orderingIndex).toBe(2);
+      expect(frames[4]!.splitPacketCount).toBeNull();
+    });
+
+    it('round-trips through send and receive', () => {
+      const sender = makeReliability();
+      const receiver = makeReliability();
+
+      const big = new Uint8Array(2500);
+      for (let i = 0; i < big.length; i++) big[i] = i & 0xff;
+
+      sender.queueOutgoing(big, Reliability.RELIABLE_ORDERED, 0);
+      const packets = sender.getOutgoingPackets();
+
+      let allMsgs: ReturnType<typeof receiver.processIncoming> = [];
+      for (const p of packets) {
+        allMsgs = allMsgs.concat(receiver.processIncoming(p));
+      }
+
+      expect(allMsgs).toHaveLength(1);
+      expect(allMsgs[0]!.payload).toEqual(big);
+    });
+  });
 });

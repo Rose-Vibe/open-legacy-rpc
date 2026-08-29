@@ -17,7 +17,15 @@ interface UnackedEntry {
   datagramSeq: number;
 }
 
+export interface DebugAckState {
+  unackedCount: number;
+  oldestUnackedMs: number;
+  oldestSeq: number;
+}
+
 export class ReliabilityLayer {
+  static readonly MAX_FRAGMENT_PAYLOAD = 1200;
+
   private sendSeq = 0;
   private recvSeqMax = -1;
   private reliableSendNum = 0;
@@ -36,6 +44,7 @@ export class ReliabilityLayer {
   private seenReliableMin = 0;
   private readonly remoteAddress: AddressInfo;
   private readonly epochNs: bigint;
+  private lastSentOrderIdx: Map<number, number> = new Map();
 
   constructor(remoteAddress: AddressInfo, epochNs?: bigint) {
     this.remoteAddress = remoteAddress;
@@ -61,6 +70,12 @@ export class ReliabilityLayer {
   }
 
   queueOutgoing(payload: Uint8Array, reliability: Reliability, orderingChannel = 0, bitLength?: number): void {
+    if (payload.length > ReliabilityLayer.MAX_FRAGMENT_PAYLOAD) {
+      const frames = this.splitMessage(payload, reliability, orderingChannel, ReliabilityLayer.MAX_FRAGMENT_PAYLOAD);
+      this.outgoingQueue.push(...frames);
+      return;
+    }
+
     const frame = createFrame(payload, reliability, bitLength);
 
     if (isReliable(reliability)) {
@@ -89,6 +104,22 @@ export class ReliabilityLayer {
     }
 
     for (const frame of this.outgoingQueue) {
+      if (frame.orderingIndex !== null && frame.reliability === Reliability.RELIABLE_ORDERED) {
+        const ch = frame.orderingChannel;
+        const last = this.lastSentOrderIdx.get(ch);
+        if (last !== undefined && frame.orderingIndex !== last && frame.orderingIndex !== last + 1) {
+          console.error(
+            `[ReliabilityLayer] ORDERING GAP on ch=${ch} for ${this.remoteAddress.host}:${this.remoteAddress.port}: ` +
+              `last sent orderIdx=${last}, now sending orderIdx=${frame.orderingIndex} ` +
+              `(gap of ${frame.orderingIndex - last - 1}), ` +
+              `reliableNum=${frame.reliableMsgNumber ?? '?'}, payload[0]=0x${(frame.payload[0] ?? 0).toString(16)}, ` +
+              `queueLen=${this.outgoingQueue.length}`,
+          );
+          console.trace('[ReliabilityLayer] ordering gap stack trace');
+        }
+        this.lastSentOrderIdx.set(ch, frame.orderingIndex);
+      }
+
       const seq = this.sendSeq;
       this.sendSeq = (this.sendSeq + 1) & 0xffffff;
       const packet = buildDataPacket(seq, [frame], this.getTimestamp());
@@ -185,6 +216,21 @@ export class ReliabilityLayer {
       }
     }
     return packets;
+  }
+
+  getDebugAckState(): DebugAckState | null {
+    if (this.unackedReliable.size === 0) return null;
+    let oldestMs = Infinity;
+    let oldestSeq = 0;
+    const now = Date.now();
+    for (const [seq, entry] of this.unackedReliable) {
+      const age = now - entry.sendTime;
+      if (age > oldestMs || oldestMs === Infinity) {
+        oldestMs = age;
+        oldestSeq = seq;
+      }
+    }
+    return { unackedCount: this.unackedReliable.size, oldestUnackedMs: oldestMs, oldestSeq };
   }
 
   private handleAck(ranges: Array<[number, number]>): void {
