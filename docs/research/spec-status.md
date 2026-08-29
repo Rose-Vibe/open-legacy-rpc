@@ -322,38 +322,34 @@ Python-only bug found this session is a shared-global cross-connection
 leak on the *inbound decode* side (`INDEX_TO_METHOD`), unrelated to this
 issue, fixed via `docs/plans/global-index-table-cross-connection-leak.md`.
 
-### 7. Peer-reported batch index always outranks a registered static index
+### 7. `registerMethodIndices` is vestigial and should be removed
 
-Both `ts/src/unity/server.ts`'s `sendRpcTo` (lines ~271-277) and
-`protocol/unity_server.py`'s `_send_rpc_to` (line ~265) check the
-peer-reported `0x07` index (`peerIndices`/`_peer_indices`) *before*
-falling back to `hasMethodIndex`/a caller-registered static index. This
-means a stale or incorrect client self-report silently wins over a
-correctly-registered static index, with no way to prefer the static value
-per-method.
+**Reframed (2026-08-29):** The original framing of this issue ("peer-reported
+batch index silently outranks a registered static index — footgun") was
+mistaken about whether the priority order is a problem. It isn't, because
+`registerMethodIndices` / `register_method_index_table` was always a
+pre-0x07 workaround: before the adoption recipe was understood, we thought
+you needed to pre-load the peer's compiled static index table to decode and
+send subsequent-use RPCs. Now that 0x07 is correctly implemented (the
+receiver announces its own index; the sender uses the announced value), there
+is no legitimate reason to pre-register a static index table. The peer's
+self-report is the authoritative value by design, and falling back to
+first-use encoding until a `0x07` arrives is already the correct behavior.
 
-This surfaced in practice during distance-server's Finding A investigation
-(status-inbox thread with `reference-twin-torch`, 2026-07-13): their
-`DistanceServer.ts` never called `registerMethodIndices()`, so the peer's
-self-reported index (itself wrong, per Known Issue #5's now-retracted
-symptom) was silently used for every subsequent-use send once the client
-announced one via `0x07`. Once traced, this was distance-server's own gap
-(no static indices registered), not a bug in this library. But the
-priority order itself — peer-reported over registered — remains a live
-footgun for any future caller that *does* register real static indices via
-`registerMethodIndices`/`register_method_index_table`: those indices can
-still be silently overridden by a bad peer self-report, with no
-per-method way to say "trust my registration over whatever this peer
-claims."
+The "priority conflict" only exists because the API still has a registration
+path that was meaningful before 0x07 was understood. No current caller
+(distance-server does not call `registerMethodIndices`) depends on it.
 
-**Workaround:** callers that have registered real static indices should
-pass `usePeerBatchIndices: false` (TS) to `UnityServer`/`RakNetServer`
-options, or the Python equivalent, to disable trusting peer self-reports
-entirely. **Not fixed:** no per-method override exists yet (e.g. "prefer
-registered index for this method, fall back to peer report only if
-unregistered"). Flipping the priority outright, or adding a per-method
-override, has not been implemented — distance-server suggested it but no
-plan has been written for it in this repo yet.
+**Remaining work:** remove `registerMethodIndices`/`registerMethodIndex` from
+the TS API and `register_method_index_table`/`register_method_indices` from
+the Python API, and drop the static-index lookup branch in
+`sendRpcTo`/`_send_rpc_to`. KI#7 disappears with it — there is no
+registered-vs-peer-reported conflict once the registered table is gone.
+
+**Prerequisite:** confirm that `0x07` handling is stable across the full
+distance-server workload (all RPC methods dispatching correctly in live play)
+before removing the fallback path, in case there are edge cases where the
+peer never sends `0x07` for a method and first-use fallback is insufficient.
 
 ---
 
