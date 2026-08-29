@@ -143,6 +143,31 @@ describe('Batch Index (0x07)', () => {
     }
   });
 
+  it('disambiguates batch-index for methods with the same methodHash but different classGuid', () => {
+    registerMethodNames([
+      'SubmitServerNetworkTimeSync',
+      'ReceiveServerNetworkTimeSync',
+    ]);
+
+    const submitId = computeMethodId('SubmitServerNetworkTimeSync');
+    const receiveId = computeMethodId('ReceiveServerNetworkTimeSync');
+    expect(bytesToHex(submitId.methodHash)).toBe(bytesToHex(receiveId.methodHash));
+    expect(bytesToHex(submitId.classGuid)).not.toBe(bytesToHex(receiveId.classGuid));
+
+    const submitBatch = encodeBatchIndex('SubmitServerNetworkTimeSync', 104);
+    const receiveBatch = encodeBatchIndex('ReceiveServerNetworkTimeSync', 80);
+
+    const decodedSubmit = decodeBatchIndex(submitBatch.data);
+    expect(decodedSubmit).not.toBeNull();
+    expect(decodedSubmit!.methodName).toBe('SubmitServerNetworkTimeSync');
+    expect(decodedSubmit!.methodIndex).toBe(104);
+
+    const decodedReceive = decodeBatchIndex(receiveBatch.data);
+    expect(decodedReceive).not.toBeNull();
+    expect(decodedReceive!.methodName).toBe('ReceiveServerNetworkTimeSync');
+    expect(decodedReceive!.methodIndex).toBe(80);
+  });
+
   // Real msg_id 0x07 frames from captures/IndexSweep-20260712-235647.pcap
   // and captures/CrossBinary-20260628-004945.pcap, decoded bit-by-bit by
   // hand (not via this repo's own encoder) to derive the true field

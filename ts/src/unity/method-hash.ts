@@ -106,6 +106,15 @@ export function lookupMethodByHash(hashHex: string): string | null {
   return null;
 }
 
+export function lookupMethodByGuidAndHash(guidHex: string, hashHex: string): string | null {
+  for (const [name, { classGuid, methodHash }] of methodIdCache) {
+    if (bytesToHex(classGuid) === guidHex && bytesToHex(methodHash) === hashHex) {
+      return name;
+    }
+  }
+  return null;
+}
+
 export function registerMethodNames(names: string[]): void {
   for (const name of names) {
     getMethodId(name);

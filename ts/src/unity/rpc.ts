@@ -5,6 +5,7 @@ import type { ViewId } from './view-id.js';
 import {
   getMethodId,
   lookupMethodByHash,
+  lookupMethodByGuidAndHash,
   registerMethodNames,
   computeMethodIndex,
   computeMethodTag,
@@ -353,7 +354,7 @@ export function decodeRpc(payload: Uint8Array, bitLength: number): DecodedRpc {
     if (hashBytes > 0) {
       const mhash = bs.readBytes(hashBytes);
       result.methodHash = bytesToHex(mhash);
-      result.methodName = lookupMethodByHash(result.methodHash) ?? 'unknown';
+      result.methodName = lookupMethodByGuidAndHash(result.classGuid, result.methodHash) ?? lookupMethodByHash(result.methodHash) ?? 'unknown';
     }
     const hashExtraBits = methodIdBits - 48;
     bs.pos = 160 + hashExtraBits + 36;
@@ -604,7 +605,7 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
     return null;
   }
 
-  bs.readBytes(6); // classGuid (skip)
+  const classGuid = bs.readBytes(6);
   const methodHash = hashBytes > 0 ? bs.readBytes(hashBytes) : new Uint8Array(0);
 
   const totalBits = payload.length * 8;
@@ -623,8 +624,9 @@ export function decodeBatchIndex(payload: Uint8Array): DecodedBatchIndex | null 
     return null;
   }
 
+  const guidHex = bytesToHex(classGuid);
   const hashHex = bytesToHex(methodHash);
-  const methodName = lookupMethodByHash(hashHex);
+  const methodName = lookupMethodByGuidAndHash(guidHex, hashHex) ?? lookupMethodByHash(hashHex);
 
   return { methodName, methodIndex };
 }

@@ -14,6 +14,7 @@ export { encodeAddress, decodeAddress } from './raknet/address.js';
 export type { DecodedAddress } from './raknet/address.js';
 export { RakNetServer, RakNetClient, ConnectionState } from './raknet/connection.js';
 export type { ClientSession, PortRemoveMode } from './raknet/connection.js';
+export type { DebugAckState } from './raknet/reliability.js';
 export {
   encodeViewId,
   encodeViewIdFromVid,
@@ -33,6 +34,7 @@ export {
   registerMethodNames,
   computeMethodIndex,
   computeMethodTag,
+  lookupMethodByGuidAndHash,
 } from './unity/method-hash.js';
 export {
   encodeRpcSubsequent,
