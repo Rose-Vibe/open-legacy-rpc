@@ -428,4 +428,8 @@ export class UnityServer {
   getSessionsByPort(port: number): ClientSession[] {
     return this.raknet.getSessionsByPort(port);
   }
+
+  getSocket(port: number): UdpSocket | undefined {
+    return this.raknet.getSocket(port);
+  }
 }

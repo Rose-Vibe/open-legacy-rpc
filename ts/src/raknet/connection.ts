@@ -239,6 +239,10 @@ export class RakNetServer {
     this.portAccepting.set(port, accepting);
   }
 
+  getSocket(port: number): UdpSocket | undefined {
+    return this.sockets.get(port);
+  }
+
   getSessionsByPort(port: number): ClientSession[] {
     const results: ClientSession[] = [];
     for (const session of this.sessionsByAddr.values()) {
@@ -511,6 +515,8 @@ export class RakNetClient {
   private guid: Uint8Array;
   private _password = '';
   private mtuSize = MTU_SIZE;
+  private preBound = false;
+  private unsubscribeSocket: (() => void) | null = null;
   private messageHandlers: Array<EventHandler<[IncomingMessage]>> = [];
   private disconnectHandlers: Array<EventHandler<[]>> = [];
   private connectHandlers: Array<EventHandler<[]>> = [];
@@ -540,18 +546,22 @@ export class RakNetClient {
   async connect(
     host: string,
     port: number,
-    options?: { password?: string; timeout?: number; localAddress?: string; mtu?: number },
+    options?: { password?: string; timeout?: number; localAddress?: string; mtu?: number; preBound?: boolean },
   ): Promise<void> {
     this.serverHost = host;
     this.serverPort = port;
     this._password = options?.password ?? '';
     this.mtuSize = options?.mtu ?? MTU_SIZE;
+    this.preBound = options?.preBound ?? false;
     const timeout = options?.timeout ?? 5000;
 
-    this.socket.onMessage((data, _remote) => {
+    this.unsubscribeSocket = this.socket.addMessageHandler((data, remote) => {
+      if (remote.host !== this.serverHost || remote.port !== this.serverPort) return;
       this.handlePacket(data);
     });
-    await this.socket.bind(0, options?.localAddress);
+    if (!this.preBound) {
+      await this.socket.bind(0, options?.localAddress);
+    }
     this.localPort = this.socket.localPort ?? 0;
 
     this.reliability = new ReliabilityLayer({ host, port });
@@ -573,7 +583,9 @@ export class RakNetClient {
           clearInterval(this.tickTimer);
           this.tickTimer = null;
         }
-        this.socket.close().catch(() => {});
+        this.unsubscribeSocket?.();
+        this.unsubscribeSocket = null;
+        if (!this.preBound) this.socket.close().catch(() => {});
         reject(new Error('Connection timed out'));
       }, timeout);
 
@@ -619,7 +631,9 @@ export class RakNetClient {
 
   async close(): Promise<void> {
     this.disconnect();
-    await this.socket.close();
+    this.unsubscribeSocket?.();
+    this.unsubscribeSocket = null;
+    if (!this.preBound) await this.socket.close();
   }
 
   send(payload: Uint8Array, reliability: Reliability, bitLength?: number): void {

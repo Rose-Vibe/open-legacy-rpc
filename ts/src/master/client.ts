@@ -44,6 +44,7 @@ export interface RegisterOptions {
 export class MasterClient {
   private client: RakNetClient;
   private socket: UdpSocket;
+  private preBound: boolean;
   private rowId: number | null = null;
   private pendingResolvers: Array<{
     msgIds: number[];
@@ -52,8 +53,9 @@ export class MasterClient {
     timer: ReturnType<typeof setTimeout>;
   }> = [];
 
-  constructor() {
-    this.socket = new UdpSocket();
+  constructor(socket?: UdpSocket) {
+    this.preBound = socket !== undefined;
+    this.socket = socket ?? new UdpSocket();
     this.client = new RakNetClient(this.socket);
     this.client.onMessage((msg) => {
       this.handleMessage(msg);
@@ -73,6 +75,7 @@ export class MasterClient {
       timeout: opts?.timeout ?? 5000,
       ...(opts?.localAddress !== undefined ? { localAddress: opts.localAddress } : {}),
       ...(opts?.mtu !== undefined ? { mtu: opts.mtu } : {}),
+      ...(this.preBound ? { preBound: true } : {}),
     });
   }
 

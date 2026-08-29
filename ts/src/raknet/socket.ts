@@ -7,16 +7,18 @@ export type ErrorHandler = (err: Error) => void;
 
 export class UdpSocket {
   private socket: Socket | null = null;
-  private messageHandler: MessageHandler | null = null;
+  private messageHandlers: MessageHandler[] = [];
   private errorHandler: ErrorHandler | null = null;
 
   bind(port: number, address = '0.0.0.0'): Promise<void> {
     return new Promise((resolve, reject) => {
       const sock = createSocket('udp4');
       sock.on('message', (msg: Buffer, rinfo: RemoteInfo) => {
-        if (this.messageHandler) {
+        const data = new Uint8Array(msg);
+        const remote = { host: rinfo.address, port: rinfo.port };
+        for (const handler of this.messageHandlers) {
           try {
-            this.messageHandler(new Uint8Array(msg), { host: rinfo.address, port: rinfo.port });
+            handler(data, remote);
           } catch (err) {
             if (this.errorHandler) {
               this.errorHandler(err instanceof Error ? err : new Error(String(err)));
@@ -50,8 +52,23 @@ export class UdpSocket {
     this.socket?.send(data, 0, data.length, port, host);
   }
 
+  /** Set a single exclusive handler, replacing any previously set via onMessage (not addMessageHandler). */
   onMessage(handler: MessageHandler): void {
-    this.messageHandler = handler;
+    // Replace only the first slot (index 0); preserve any addMessageHandler slots beyond that.
+    if (this.messageHandlers.length === 0) {
+      this.messageHandlers.push(handler);
+    } else {
+      this.messageHandlers[0] = handler;
+    }
+  }
+
+  /** Add a handler alongside existing ones. Returns an unsubscribe function. */
+  addMessageHandler(handler: MessageHandler): () => void {
+    this.messageHandlers.push(handler);
+    return () => {
+      const idx = this.messageHandlers.indexOf(handler);
+      if (idx >= 0) this.messageHandlers.splice(idx, 1);
+    };
   }
 
   close(): Promise<void> {
