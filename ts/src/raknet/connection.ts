@@ -539,7 +539,7 @@ export class RakNetClient {
   async connect(
     host: string,
     port: number,
-    options?: { password?: string; timeout?: number },
+    options?: { password?: string; timeout?: number; localAddress?: string },
   ): Promise<void> {
     this.serverHost = host;
     this.serverPort = port;
@@ -549,7 +549,7 @@ export class RakNetClient {
     this.socket.onMessage((data, _remote) => {
       this.handlePacket(data);
     });
-    await this.socket.bind(0);
+    await this.socket.bind(0, options?.localAddress);
     this.localPort = this.socket.localPort ?? 0;
 
     this.reliability = new ReliabilityLayer({ host, port });

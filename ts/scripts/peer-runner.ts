@@ -566,7 +566,7 @@ class PeerTestRunner {
       const mc = new MasterClient();
       this.masterClients.set(clientName, mc);
       try {
-        await mc.connect('127.0.0.1', this.masterPort, 5000);
+        await mc.connect('127.0.0.1', this.masterPort, { timeout: 5000 });
       } catch (e: unknown) {
         this.failures.push(
           `Master connect failed for '${clientName}': ${e instanceof Error ? e.message : String(e)}`,

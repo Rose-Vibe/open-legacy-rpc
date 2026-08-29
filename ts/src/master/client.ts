@@ -64,8 +64,15 @@ export class MasterClient {
     return this.client.connected;
   }
 
-  async connect(host = '127.0.0.1', port = 23466, timeout = 5000): Promise<void> {
-    await this.client.connect(host, port, { timeout });
+  async connect(
+    host = '127.0.0.1',
+    port = 23466,
+    opts?: { timeout?: number; localAddress?: string },
+  ): Promise<void> {
+    await this.client.connect(host, port, {
+      timeout: opts?.timeout ?? 5000,
+      ...(opts?.localAddress !== undefined ? { localAddress: opts.localAddress } : {}),
+    });
   }
 
   async close(): Promise<void> {
