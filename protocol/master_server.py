@@ -32,6 +32,9 @@ INTERNAL_COLUMNS = [
     {'name': '__SystemGuid', 'type': BINARY},
     {'name': '__lastPingResponseTime', 'type': NUMERIC},
     {'name': '__nextPingSendTime', 'type': NUMERIC},
+    # Stores the IP the registrant supplied in the payload (may be a LAN IP).
+    # Never returned to query clients — used to serve the right IP per requester.
+    {'name': '__givenIp', 'type': BINARY},
 ]
 
 PING_INTERVAL = 15.0
@@ -93,7 +96,8 @@ class Table:
         self._addr_to_row[addr_key] = row_id
         return row_id
 
-    def query(self, column_subset=None, filters=None, row_ids=None):
+    def query(self, column_subset=None, filters=None, row_ids=None,
+              requester_ip=None):
         result_rows = []
         for row_id, cells in self.rows.items():
             if row_ids and row_id not in row_ids:
@@ -106,6 +110,22 @@ class Table:
                                   if k in column_subset}
             else:
                 filtered_cells = dict(cells)
+
+            # Serve the registrant's given IP to requesters coming from the
+            # same public IP (LAN peers), and the actual connection IP to
+            # everyone else.
+            if 'IP address' in filtered_cells and requester_ip is not None:
+                stored_ip_bytes = cells.get('IP address', b'')
+                stored_ip = stored_ip_bytes.split(b'\x00')[0].decode('ascii', errors='replace') \
+                    if isinstance(stored_ip_bytes, (bytes, bytearray)) else ''
+                if stored_ip == requester_ip:
+                    given_ip = cells.get('__givenIp')
+                    if given_ip:
+                        filtered_cells['IP address'] = given_ip
+
+            # __givenIp is always internal — never expose it to query clients.
+            filtered_cells.pop('__givenIp', None)
+
             result_rows.append({'key': row_id, 'cells': filtered_cells})
         return result_rows
 
@@ -236,6 +256,12 @@ class MasterServer:
         for cell in msg['cells']:
             cells[cell['name']] = cell['value']
 
+        # Save the registrant's given IP before overwriting with the actual
+        # source address, so query() can serve it back to same-IP requesters.
+        given_ip_raw = cells.get('IP address', b'')
+        given_ip_bytes = given_ip_raw if isinstance(given_ip_raw, (bytes, bytearray)) else b''
+        cells['__givenIp'] = bytes(given_ip_bytes)
+
         ip_str = addr[0]
         ip_bytes = ip_str.encode('ascii')
         ip_padded = ip_bytes + b'\x00' * (16 - len(ip_bytes))
@@ -285,6 +311,7 @@ class MasterServer:
             column_subset=msg['column_subset'] or None,
             filters=msg['filters'] or None,
             row_ids=msg['row_ids'] or None,
+            requester_ip=addr[0],
         )
 
         columns = list(table.columns)

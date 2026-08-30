@@ -29,6 +29,9 @@ const INTERNAL_COLUMNS: Column[] = [
   { name: '__SystemGuid', type: BINARY },
   { name: '__lastPingResponseTime', type: NUMERIC },
   { name: '__nextPingSendTime', type: NUMERIC },
+  // Stores the IP the registrant supplied in the payload (may be a LAN IP).
+  // Never returned to query clients — used to serve the right IP per requester.
+  { name: '__givenIp', type: BINARY },
 ];
 
 const PING_INTERVAL = 15000;
@@ -103,6 +106,7 @@ export class Table {
     columnSubset?: string[] | null,
     filters?: Array<{ name: string; operation: number; value: number | string | Uint8Array | null }> | null,
     rowIds?: number[] | null,
+    requesterIp?: string,
   ): Array<{ key: number; cells: Record<string, number | string | Uint8Array | null> }> {
     const result: Array<{ key: number; cells: Record<string, number | string | Uint8Array | null> }> = [];
     const rowIdSet = rowIds ? new Set(rowIds) : null;
@@ -121,6 +125,22 @@ export class Table {
       } else {
         filteredCells = { ...cells };
       }
+
+      // Serve the registrant's given IP to requesters coming from the same
+      // public IP (LAN peers), and the actual connection IP to everyone else.
+      if ('IP address' in filteredCells && requesterIp !== undefined) {
+        const publicIpBytes = cells['IP address'];
+        const publicIp = publicIpBytes instanceof Uint8Array
+          ? new TextDecoder().decode(publicIpBytes).replace(/\0.*/, '')
+          : null;
+        if (publicIp === requesterIp) {
+          const givenIp = cells['__givenIp'];
+          if (givenIp instanceof Uint8Array) filteredCells['IP address'] = givenIp;
+        }
+      }
+      // __givenIp is always internal — never expose it to query clients.
+      delete filteredCells['__givenIp'];
+
       result.push({ key: rowId, cells: filteredCells });
     }
     return result;
@@ -275,6 +295,12 @@ export class MasterServer {
       cells[cell.name] = cell.value;
     }
 
+    // Save the registrant's given IP before we overwrite it with the actual
+    // source address, so query() can serve it back to same-IP requesters.
+    const givenIpRaw = cells['IP address'];
+    const givenIpBytes = givenIpRaw instanceof Uint8Array ? givenIpRaw : new Uint8Array(16);
+    cells['__givenIp'] = givenIpBytes;
+
     const ipStr = session.address.host;
     const ipBytes = new TextEncoder().encode(ipStr);
     const ipPadded = new Uint8Array(16);
@@ -332,6 +358,7 @@ export class MasterServer {
       msg.columnSubset.length > 0 ? msg.columnSubset : null,
       msg.filters.length > 0 ? msg.filters : null,
       msg.rowIds.length > 0 ? msg.rowIds : null,
+      session.address.host,
     );
 
     const reply = encodeQueryReply(table.columns, rows);

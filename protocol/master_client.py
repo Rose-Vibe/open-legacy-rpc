@@ -36,8 +36,12 @@ class MasterClient:
         self._registration = None
         self._last_reregister = 0
 
-    def connect(self, host='127.0.0.1', port=23466, timeout=5.0):
-        self._client.connect(host, port, timeout=timeout)
+    def connect(self, host='127.0.0.1', port=23466, timeout=5.0,
+               local_address=None):
+        """Connect to master server. local_address binds the socket to a
+        specific local IP so the server sees the correct interface address."""
+        self._client.connect(host, port, timeout=timeout,
+                             local_address=local_address)
 
     def disconnect(self):
         self._client.disconnect()
@@ -50,9 +54,19 @@ class MasterClient:
     def register_host(self, game_type, name, comment='',
                       player_count=0, player_limit=4,
                       password_protected=False, use_nat=False,
-                      port=7777, timeout=5.0):
-        """Register a game host with the master server. Returns the assigned row_id."""
-        ip_bytes = b'0.0.0.0\x00' + b'\x00' * 8
+                      port=7777, timeout=5.0, ip=None):
+        """Register a game host with the master server. Returns the assigned row_id.
+
+        ip: optional IP string to report as the 'IP address' cell.  When None,
+        reports '0.0.0.0' so the master server uses the actual connection address.
+        Pass a LAN address here when you want same-network peers to connect via
+        the local interface.
+        """
+        if ip is not None:
+            ip_enc = ip.encode('ascii')
+            ip_bytes = ip_enc + b'\x00' * (16 - len(ip_enc))
+        else:
+            ip_bytes = b'0.0.0.0\x00' + b'\x00' * 8
         cells = [
             {'name': 'NAT', 'type': NUMERIC, 'value': 1.0 if use_nat else 0.0},
             {'name': 'Game name', 'type': STRING, 'value': name},
@@ -70,7 +84,7 @@ class MasterClient:
             'game_type': game_type, 'name': name, 'comment': comment,
             'player_count': player_count, 'player_limit': player_limit,
             'password_protected': password_protected, 'use_nat': use_nat,
-            'port': port,
+            'port': port, 'ip': ip,
         }
         self._client.send_message(payload, Reliability.RELIABLE_ORDERED)
         self._last_reregister = time.monotonic()
@@ -130,7 +144,12 @@ class MasterClient:
         if time.monotonic() - self._last_reregister < self.REREGISTER_INTERVAL:
             return
         r = self._registration
-        ip_bytes = b'0.0.0.0\x00' + b'\x00' * 8
+        reg_ip = r.get('ip')
+        if reg_ip is not None:
+            ip_enc = reg_ip.encode('ascii')
+            ip_bytes = ip_enc + b'\x00' * (16 - len(ip_enc))
+        else:
+            ip_bytes = b'0.0.0.0\x00' + b'\x00' * 8
         cells = [
             {'name': 'NAT', 'type': NUMERIC,
              'value': 1.0 if r['use_nat'] else 0.0},

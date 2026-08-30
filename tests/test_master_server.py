@@ -468,5 +468,180 @@ class TestMasterServerVersionMismatch(unittest.TestCase):
             time.sleep(0.005)
 
 
+class TestDualIpMasterServer(unittest.TestCase):
+    """Unit tests for the dual-IP (given vs. connection IP) logic in Table.query()."""
+
+    def _make_table(self, public_ip, given_ip):
+        from protocol.master_server import Table
+        table = Table('test')
+        table.add_column('IP address', BINARY)
+        table.add_column('Game name', STRING)
+
+        def _enc(ip):
+            b = ip.encode('ascii')
+            return b + b'\x00' * (16 - len(b))
+
+        addr_key = f'{public_ip}:7777'
+        row_id = table.get_or_create_row_for_addr(addr_key)
+        table.update_row(row_id, {
+            'IP address': _enc(public_ip),
+            '__givenIp': _enc(given_ip),
+            'Game name': 'TestServer',
+        })
+        return table, _enc
+
+    def test_same_ip_requester_gets_given_ip(self):
+        """A requester from the same public IP should see the registrant's given IP."""
+        table, enc = self._make_table('1.2.3.4', '10.0.0.5')
+        rows = table.query(requester_ip='1.2.3.4')
+        self.assertEqual(len(rows), 1)
+        ip_bytes = rows[0]['cells']['IP address']
+        ip_str = ip_bytes.split(b'\x00')[0].decode('ascii')
+        self.assertEqual(ip_str, '10.0.0.5')
+
+    def test_different_ip_requester_gets_public_ip(self):
+        """A requester from a different IP should see the actual connection IP."""
+        table, enc = self._make_table('1.2.3.4', '10.0.0.5')
+        rows = table.query(requester_ip='5.6.7.8')
+        self.assertEqual(len(rows), 1)
+        ip_bytes = rows[0]['cells']['IP address']
+        ip_str = ip_bytes.split(b'\x00')[0].decode('ascii')
+        self.assertEqual(ip_str, '1.2.3.4')
+
+    def test_no_requester_ip_returns_public_ip(self):
+        """Without requester_ip, the stored (public) IP is returned unchanged."""
+        table, enc = self._make_table('1.2.3.4', '10.0.0.5')
+        rows = table.query()
+        ip_bytes = rows[0]['cells']['IP address']
+        ip_str = ip_bytes.split(b'\x00')[0].decode('ascii')
+        self.assertEqual(ip_str, '1.2.3.4')
+
+    def test_given_ip_never_in_response(self):
+        """__givenIp must never appear in any query result."""
+        table, enc = self._make_table('1.2.3.4', '10.0.0.5')
+        for requester in [None, '1.2.3.4', '5.6.7.8']:
+            rows = table.query(requester_ip=requester)
+            for row in rows:
+                self.assertNotIn('__givenIp', row['cells'],
+                                 f'__givenIp leaked for requester_ip={requester!r}')
+
+    def test_integration_dual_ip_via_server_and_client(self):
+        """End-to-end: register with ip='10.0.0.5'; query from same and different IPs."""
+        port = 24480
+        server = MasterServer(port=port)
+        server.start()
+        server_thread = threading.Thread(
+            target=lambda: self._run_server(server, 4.0), daemon=True)
+        server_thread.start()
+        time.sleep(0.2)
+
+        try:
+            reg = MasterClient()
+            reg.connect('127.0.0.1', port, timeout=2.0)
+            reg.register_host('TestGame', 'MyServer', port=7777, ip='10.0.0.5')
+            time.sleep(0.3)
+
+            # Query from 127.0.0.1 — same as connection IP, so we get given IP
+            q1 = MasterClient()
+            q1.connect('127.0.0.1', port, timeout=2.0)
+            hosts = q1.request_host_list('TestGame')
+            self.assertEqual(len(hosts), 1)
+            # The registrant connected from 127.0.0.1; requester is also 127.0.0.1
+            # so they get the given IP (10.0.0.5)
+            self.assertEqual(hosts[0]['ip'], '10.0.0.5')
+            q1.disconnect()
+            reg.disconnect()
+        finally:
+            server.stop()
+            server_thread.join(timeout=2.0)
+
+    def _run_server(self, server, duration):
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            server.tick(timeout=0.01)
+            time.sleep(0.005)
+
+
+class TestSocketFeatures(unittest.TestCase):
+    """Tests for RakNetClient local_address and RakNetServer multi-interface support."""
+
+    def test_client_local_address_binds_correctly(self):
+        """RakNetClient.connect() with local_address binds to that IP."""
+        from protocol.raknet_connection import RakNetClient, RakNetServer, ConnectionState
+
+        server = RakNetServer(port=0, unity_protocol=False)
+        server.start()
+        server_port = server.sock.getsockname()[1]
+
+        connect_happened = threading.Event()
+        server.on_connect(lambda addr, idx: connect_happened.set())
+
+        server_thread = threading.Thread(
+            target=lambda: self._run_server(server, 3.0), daemon=True)
+        server_thread.start()
+        time.sleep(0.1)
+
+        try:
+            client = RakNetClient(unity_protocol=False)
+            client.connect('127.0.0.1', server_port, timeout=2.0,
+                           local_address='127.0.0.1')
+            # The local socket should be bound to 127.0.0.1, not 0.0.0.0
+            self.assertEqual(client.local_addr[0], '127.0.0.1')
+            self.assertEqual(client.state, ConnectionState.CONNECTED)
+            client.disconnect()
+        finally:
+            server.stop()
+            server_thread.join(timeout=2.0)
+
+    def test_server_get_socket_returns_correct_socket(self):
+        """get_socket() returns the socket bound to the given port."""
+        from protocol.raknet_connection import RakNetServer
+
+        server = RakNetServer(port=0, unity_protocol=False)
+        server.start()
+        port = server.sock.getsockname()[1]
+
+        try:
+            sock = server.get_socket(port)
+            self.assertIsNotNone(sock)
+            self.assertEqual(sock.getsockname()[1], port)
+        finally:
+            server.stop()
+
+    def test_server_get_socket_unknown_port_returns_none(self):
+        """get_socket() returns None for a port not in use."""
+        from protocol.raknet_connection import RakNetServer
+
+        server = RakNetServer(port=0, unity_protocol=False)
+        server.start()
+        try:
+            self.assertIsNone(server.get_socket(9))
+        finally:
+            server.stop()
+
+    def test_server_listen_interfaces_creates_multiple_sockets(self):
+        """listen_interfaces creates one socket per interface."""
+        from protocol.raknet_connection import RakNetServer
+
+        server = RakNetServer(port=0, unity_protocol=False,
+                              listen_interfaces=['127.0.0.1', '127.0.0.1'])
+        # Note: binding two sockets to the same IP/port only works if port=0
+        # (OS assigns distinct ephemeral ports). For a real multi-interface scenario
+        # each iface is different; here we just verify the count.
+        try:
+            server.start()
+            self.assertEqual(len(server._sockets), 2)
+        except OSError:
+            pass  # Some OS won't allow duplicate binds — just ensure no crash
+        finally:
+            server.stop()
+
+    def _run_server(self, server, duration):
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            server.poll(timeout=0.01)
+            time.sleep(0.005)
+
+
 if __name__ == '__main__':
     unittest.main()

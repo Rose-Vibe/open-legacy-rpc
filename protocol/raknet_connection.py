@@ -59,11 +59,18 @@ class RakNetClient:
         self._message_handlers = {}
         self._queued_messages = []
 
-    def connect(self, host, port, timeout=5.0, password=''):
-        """Connect to a RakNet server. Blocks until connected or timeout."""
+    def connect(self, host, port, timeout=5.0, password='', local_address=None):
+        """Connect to a RakNet server. Blocks until connected or timeout.
+
+        local_address: optional IP string to bind the outgoing socket to.
+        Useful when the server should see a specific interface address.
+        """
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setblocking(False)
-        self.sock.bind(('', 0))
+        if local_address is not None:
+            self.sock.bind((local_address, 0))
+        else:
+            self.sock.bind(('', 0))
         self.local_addr = self.sock.getsockname()
         self.server_addr = (host, port)
         self._password = password
@@ -242,13 +249,19 @@ class RakNetServer:
     """Server-side RakNet listener that accepts connections."""
 
     def __init__(self, port=7777, max_connections=4, viewid_stride=50,
-                 password='', unity_protocol=True):
+                 password='', unity_protocol=True,
+                 listen_interfaces=None, bind_address=None):
         self.port = port
         self.max_connections = max_connections
         self._password = password
         self.viewid_stride = viewid_stride
         self._unity_protocol = unity_protocol
-        self.sock = None
+        # listen_interfaces: list of IP strings to bind separate sockets on.
+        # bind_address: single IP string (used when listen_interfaces is None).
+        self._listen_interfaces = listen_interfaces
+        self._bind_address = bind_address or ''
+        self.sock = None  # primary socket (first in _sockets, or sole socket)
+        self._sockets = []  # list of (sock, bound_address) tuples
         self.peers = {}  # addr -> RakNetPeer
         self.player_indices = {}  # addr -> player_index
         self.peer_launch_ids = {}  # addr -> int (8-byte GUID from client, random per game launch)
@@ -259,9 +272,14 @@ class RakNetServer:
         self._disconnect_handler = None
 
     def start(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setblocking(False)
-        self.sock.bind(('', self.port))
+        self._sockets = []
+        ifaces = self._listen_interfaces if self._listen_interfaces else [self._bind_address]
+        for iface in ifaces:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setblocking(False)
+            s.bind((iface, self.port))
+            self._sockets.append((s, iface))
+        self.sock = self._sockets[0][0]
 
     def stop(self):
         for addr, peer in list(self.peers.items()):
@@ -270,11 +288,30 @@ class RakNetServer:
                 peer.send_message(payload, Reliability.RELIABLE_ORDERED)
             except OSError:
                 pass
-        if self.sock:
-            self.sock.close()
-            self.sock = None
+        for s, _ in self._sockets:
+            try:
+                s.close()
+            except OSError:
+                pass
+        self._sockets = []
+        self.sock = None
         self.peers.clear()
         self.player_indices.clear()
+
+    def get_socket(self, port, address=None):
+        """Return the socket bound to (address, port), or None if not found.
+
+        If address is None, returns the first socket bound to the given port.
+        Useful for sharing a socket with MasterClient so registrations arrive
+        from the correct (interface, port).
+        """
+        for s, bound_addr in self._sockets:
+            sock_addr = s.getsockname()
+            if sock_addr[1] != port:
+                continue
+            if address is None or sock_addr[0] == address or bound_addr == address:
+                return s
+        return None
 
     def on_connect(self, handler):
         self._connect_handler = handler
@@ -301,51 +338,51 @@ class RakNetServer:
     def poll(self, timeout=0.0):
         """Poll for incoming messages. Returns list of (addr, msg_id, payload, reliability, bit_length) tuples."""
         messages = []
-        if self.sock is None:
+        if not self._sockets:
             return messages
+        all_socks = [s for s, _ in self._sockets]
         try:
-            ready, _, _ = select.select([self.sock], [], [], timeout)
+            ready, _, _ = select.select(all_socks, [], [], timeout)
         except (ValueError, OSError):
             return messages
         if not ready:
             return messages
 
-        while True:
-            if self.sock is None:
-                break
-            try:
-                data, addr = self.sock.recvfrom(65535)
-            except (BlockingIOError, OSError, AttributeError):
-                break
+        for recv_sock in ready:
+            while True:
+                try:
+                    data, addr = recv_sock.recvfrom(65535)
+                except (BlockingIOError, OSError, AttributeError):
+                    break
 
-            if not data:
-                continue
-
-            if data[0] == ID_OPEN_CONNECTION_REQUEST:
-                self._handle_open_connection_request(addr, data)
-                continue
-
-            if addr not in self.peers:
-                continue
-
-            peer = self.peers[addr]
-            results = peer.handle_received(data)
-            peer.flush_pending_acks()
-
-            for item in results:
-                if isinstance(item, tuple) and item[0] == 'offline':
-                    continue
-                msg = item
-                if not msg.payload:
+                if not data:
                     continue
 
-                msg_id = msg.payload[0]
-                handled = self._handle_internal(addr, msg_id, msg.payload)
-                if not handled:
-                    messages.append((addr, msg_id, msg.payload, msg.reliability,
-                                     msg.bit_length))
-                    if msg_id in self._message_handlers:
-                        self._message_handlers[msg_id](addr, msg.payload)
+                if data[0] == ID_OPEN_CONNECTION_REQUEST:
+                    self._handle_open_connection_request(addr, data, recv_sock)
+                    continue
+
+                if addr not in self.peers:
+                    continue
+
+                peer = self.peers[addr]
+                results = peer.handle_received(data)
+                peer.flush_pending_acks()
+
+                for item in results:
+                    if isinstance(item, tuple) and item[0] == 'offline':
+                        continue
+                    msg = item
+                    if not msg.payload:
+                        continue
+
+                    msg_id = msg.payload[0]
+                    handled = self._handle_internal(addr, msg_id, msg.payload)
+                    if not handled:
+                        messages.append((addr, msg_id, msg.payload, msg.reliability,
+                                         msg.bit_length))
+                        if msg_id in self._message_handlers:
+                            self._message_handlers[msg_id](addr, msg.payload)
 
         return messages
 
@@ -371,7 +408,9 @@ class RakNetServer:
             return True
         return False
 
-    def _handle_open_connection_request(self, addr, data):
+    def _handle_open_connection_request(self, addr, data, sock=None):
+        if sock is None:
+            sock = self.sock
         if addr not in self.peers and len(self.peers) >= self.max_connections:
             log.info("Rejected connection from %s: at capacity (%d/%d)",
                      addr, len(self.peers), self.max_connections)
@@ -389,10 +428,10 @@ class RakNetServer:
         server_nonce = os.urandom(4)
         buf[21:25] = server_nonce
         buf[25:31] = encode_address(addr[0], addr[1])
-        self.sock.sendto(bytes(buf), addr)
+        sock.sendto(bytes(buf), addr)
 
         if addr not in self.peers:
-            self.peers[addr] = RakNetPeer(self.sock, addr)
+            self.peers[addr] = RakNetPeer(sock, addr)
 
     def _handle_connection_request(self, addr, payload):
         if self._password:
