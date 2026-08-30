@@ -15,15 +15,23 @@ interface MockSocket extends UdpSocket {
 }
 
 function createMockSocket(port = 0): MockSocket {
-  let handler: MessageCallback | null = null;
+  const handlers: MessageCallback[] = [];
   const sent: Array<{ data: Uint8Array; host: string; port: number }> = [];
   return {
     sent,
     triggerMessage(data: Uint8Array, remote: { host: string; port: number }) {
-      handler?.(data, remote);
+      for (const h of handlers) h(data, remote);
     },
     onMessage(cb: MessageCallback) {
-      handler = cb;
+      if (handlers.length === 0) handlers.push(cb);
+      else handlers[0] = cb;
+    },
+    addMessageHandler(cb: MessageCallback) {
+      handlers.push(cb);
+      return () => {
+        const idx = handlers.indexOf(cb);
+        if (idx >= 0) handlers.splice(idx, 1);
+      };
     },
     async bind(_port: number) {
       // no-op
