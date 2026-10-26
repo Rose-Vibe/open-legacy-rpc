@@ -14,8 +14,8 @@ lookup), or if decode_batch_index mis-decoded the peer's self-reported
 index (see docs/research/2026-07-13-batch-index-decoder-was-broken.md),
 this test would show one client's RPC misdispatching to the wrong method.
 """
-import time
 import threading
+import time
 
 from protocol.unity_client import UnityClient
 from protocol.unity_server import UnityServer

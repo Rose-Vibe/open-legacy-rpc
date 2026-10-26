@@ -8,9 +8,9 @@ Tests:
 Usage: Run Unity server with PasswordInteropExperiment first.
   sudo ip netns exec unitynet python3 tests/interop_password_client.py
 """
+import logging
 import sys
 import time
-import logging
 
 sys.path.insert(0, '.')
 from protocol.unity_client import UnityClient

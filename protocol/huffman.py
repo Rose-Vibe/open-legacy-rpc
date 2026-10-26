@@ -116,7 +116,7 @@ def encode_string(s):
     bits = ''
     for ch in s.encode('latin-1'):
         if ch not in _codes:
-            raise ValueError("Character %d (0x%02x) not in Huffman table" % (ch, ch))
+            raise ValueError(f"Character {ch} (0x{ch:02x}) not in Huffman table")
         bits += _codes[ch]
     return bits
 

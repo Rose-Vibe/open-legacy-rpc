@@ -145,31 +145,33 @@ export class RakNetServer {
 
   async start(): Promise<void> {
     if (this.externalSocket) {
-      if (this.initialPorts.length > 0) {
-        const port = this.initialPorts[0]!;
+      const [firstPort] = this.initialPorts;
+      if (firstPort !== undefined) {
         const primaryAddress = this.listenInterfaces[0] ?? '0.0.0.0';
-        this.sockets.set(RakNetServer.socketKey(primaryAddress, port), this.externalSocket);
-        this.portAccepting.set(port, true);
-        this.externalSocket.onMessage((data, remote) => {
-          this.handlePacket(data, remote, this.externalSocket!);
+        const extSocket = this.externalSocket;
+        this.sockets.set(RakNetServer.socketKey(primaryAddress, firstPort), extSocket);
+        this.portAccepting.set(firstPort, true);
+        extSocket.onMessage((data, remote) => {
+          this.handlePacket(data, remote, extSocket);
         });
-        await this.externalSocket.bind(port, primaryAddress);
+        await extSocket.bind(firstPort, primaryAddress);
         // Bind additional interfaces on the same port with fresh sockets.
         if (this.listenInterfaces.length > 1) {
           const { UdpSocket: SocketClass } = await import('./socket.js');
           for (let i = 1; i < this.listenInterfaces.length; i++) {
-            const address = this.listenInterfaces[i]!;
+            const address = this.listenInterfaces[i] as string;
             const sock = new SocketClass();
             sock.onMessage((data, remote) => {
               this.handlePacket(data, remote, sock);
             });
-            await sock.bind(port, address);
-            this.sockets.set(RakNetServer.socketKey(address, port), sock);
+            await sock.bind(firstPort, address);
+            this.sockets.set(RakNetServer.socketKey(address, firstPort), sock);
           }
         }
       }
       for (let i = 1; i < this.initialPorts.length; i++) {
-        await this.addPort(this.initialPorts[i]!);
+        const port = this.initialPorts[i] as number;
+        await this.addPort(port);
       }
     } else {
       for (const port of this.initialPorts) {
@@ -486,7 +488,7 @@ export class RakNetServer {
 
   private handlePlayerReady(session: ClientSession): void {
     const playerIdx = this.freePlayerIndices.length > 0
-      ? this.freePlayerIndices.shift()!
+      ? (this.freePlayerIndices.shift() as number)
       : this.nextPlayerIndex++;
     session.playerIndex = playerIdx;
 

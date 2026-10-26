@@ -6,9 +6,9 @@ BitStream and Huffman StringCompressor.
 """
 
 import logging
-import struct
+
 from .bitstream import BitStream
-from .huffman import get_tree, encode_string_for_wire
+from .huffman import encode_string_for_wire, get_tree
 
 log = logging.getLogger(__name__)
 

@@ -1,8 +1,8 @@
 """Minimal pcap/pcapng reader using only the standard library."""
+import os
 import struct
 import subprocess
 import tempfile
-import os
 
 
 def read_pcap(path):

@@ -4,8 +4,9 @@ Differential analysis tool for Unity legacy networking experiments.
 Compares packets between pcaps or within a single pcap to find
 the bytes that change when we vary one parameter.
 """
-import sys
 import struct
+import sys
+
 from .pcap_reader import read_pcap
 
 

@@ -280,10 +280,6 @@ function inputToRpcParams(inp: Record<string, unknown>): RpcParam[] {
   });
 }
 
-function viewIdInt(vid: ViewIdInput): number {
-  return vid.scope === 'scene' ? vid.id : 0x100000000 + vid.id;
-}
-
 handlers.set('rpcEncode', (inp) => {
   const params = inputToRpcParams(inp);
   const mode = RPC_MODE_FROM_NAME[inp['rpcMode'] as string];

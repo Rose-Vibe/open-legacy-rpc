@@ -1,15 +1,15 @@
 {
   "name": "open-legacy-rpc",
   "version": "1.0.0",
-  "private": true,
+  "license": "MIT",
   "type": "module",
-  "files": ["dist", "src"],
+  "files": ["dist", "src", "LICENSE"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
@@ -35,7 +35,7 @@
   },
   "packageManager": "pnpm@10.27.0",
   "engines": {
-    "node": "^22.0.0",
+    "node": ">=22",
     "pnpm": ">=10.0.0"
   },
   "dependencies": {

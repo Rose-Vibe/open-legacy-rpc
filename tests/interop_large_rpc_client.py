@@ -3,9 +3,9 @@
 
 Usage: Start Unity server with LargeRpcExperiment, then run this.
 """
+import logging
 import sys
 import time
-import logging
 
 sys.path.insert(0, '.')
 from protocol.unity_client import UnityClient
@@ -28,7 +28,7 @@ def on_rpc_bytes(data):
             valid = False
             break
     if valid:
-        log.info(f'  Data integrity OK')
+        log.info('  Data integrity OK')
     received.append((len(data), valid))
 
 

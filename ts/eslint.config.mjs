@@ -43,10 +43,21 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true, allowBoolean: true },
+      ],
 
       '@eslint-community/eslint-comments/no-unlimited-disable': 'error',
 
       'no-console': 'error',
+    },
+  },
+
+  {
+    files: ['**/src/**/*.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 

@@ -9,14 +9,14 @@ Usage:
   # Start Unity server with --max-connections N, then run this:
   sudo ip netns exec unitynet python3 tests/interop_viewid_scaling.py --count N
 """
+import argparse
+import logging
+import struct
 import sys
 import time
-import struct
-import logging
-import argparse
 
 sys.path.insert(0, '.')
-from protocol.raknet_connection import RakNetClient, ConnectionState
+from protocol.raknet_connection import RakNetClient
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(message)s')
 log = logging.getLogger('viewid-scaling')
@@ -89,12 +89,12 @@ def main():
         last = clients[-1].assignment
         log.info(f'\nHighest alloc_start: {last["alloc_start"]}')
         if last['alloc_start'] >= 1000:
-            log.warning(f'alloc_start >= 1000 — potential ViewID overflow!')
+            log.warning('alloc_start >= 1000 — potential ViewID overflow!')
 
     for c in clients:
         try:
             c.raknet.disconnect()
-        except:
+        except Exception:
             pass
 
     return 0

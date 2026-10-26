@@ -1,23 +1,28 @@
 """Tests for the pcap decoder tool."""
-import json
-import math
+import os
 import struct
 import sys
-import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from protocol.bitstream import BitStream
 from protocol.raknet import Reliability
 from protocol.unity_protocol import (
-    encode_rpc_first_use, encode_rpc_subsequent, encode_batch_index,
-    encode_state_sync, RPCMode, MSG_ID_RPC, MSG_ID_BATCH_INDEX,
-    compute_method_tag, register_method_tag, METHOD_TAG_MAP,
+    METHOD_TAG_MAP,
+    RPCMode,
+    compute_method_tag,
+    encode_batch_index,
+    encode_rpc_first_use,
+    encode_rpc_subsequent,
+    encode_state_sync,
+    register_method_tag,
 )
-from protocol.bitstream import BitStream
 from tools.decode_pcap import (
-    decode_packet, decode_raknet, decode_frame, decode_unity,
-    decode_rpc_layer, decode_state_sync_layer, decode_batch_index_layer,
-    _json_safe, load_config,
+    _json_safe,
+    decode_packet,
+    decode_raknet,
+    decode_unity,
+    load_config,
 )
 
 
@@ -207,7 +212,7 @@ def test_rpc_subsequent_decode():
 
 def test_rpc_unknown_signature():
     """RPC with unknown method produces not_deserialized params."""
-    from protocol.unity_protocol import METHOD_INDEX_MAP, INDEX_TO_METHOD, METHOD_SIGNATURES
+    from protocol.unity_protocol import INDEX_TO_METHOD, METHOD_INDEX_MAP
     METHOD_INDEX_MAP['FakeMethod'] = 126
     INDEX_TO_METHOD[126] = 'FakeMethod'
     try:
@@ -338,7 +343,6 @@ def test_full_pipeline_state_sync():
 
 
 def test_direction_detection():
-    from tools.decode_pcap import main
     config = {'serverPort': 7777}
     rpc_data, _ = encode_rpc_subsequent(
         'RPC_Void', [], view_id=1, timestamp_ms=0, mode=RPCMode.Server,

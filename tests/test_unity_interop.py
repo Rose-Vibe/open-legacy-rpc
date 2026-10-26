@@ -10,11 +10,8 @@ Requires the Unity server to be running with an experiment that has
 RPC handlers (e.g., ConnectExperiment or any experiment using Loader's RPCs).
 """
 import sys
-import time
 
 from protocol.unity_client import UnityClient
-from protocol.unity_protocol import RPCMode
-from protocol.bitstream import BitStream
 
 
 def main():

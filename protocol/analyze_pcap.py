@@ -4,8 +4,9 @@ Analyze pcap files from Unity legacy networking experiments.
 Dumps UDP payloads with hex + ASCII, identifies RakNet framing,
 and highlights potential Unity-layer messages.
 """
-import sys
 import struct
+import sys
+
 from .pcap_reader import read_pcap
 
 

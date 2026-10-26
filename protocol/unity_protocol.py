@@ -6,7 +6,7 @@ import struct
 from enum import IntEnum
 
 from .bitstream import BitStream
-from .huffman import get_tree, get_codes, decode_string, encode_string_for_wire
+from .huffman import decode_string, encode_string_for_wire, get_codes, get_tree
 
 log = logging.getLogger(__name__)
 
@@ -417,7 +417,6 @@ def encode_rpc_subsequent(method_name, params, view_id=1, timestamp_ms=0,
     sig = METHOD_SIGNATURES.get(method_name, [])
     param_bs = BitStream()
     _encode_params(param_bs, sig, params)
-    param_data = param_bs.to_bytes()
     param_bits = param_bs.bit_length
 
     # method_index >= 128 needs a 20-bit span here instead of 16, with an

@@ -1,0 +1,127 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+    inputs:
+      dry_run:
+        description: 'Dry run (skip actual publish to registries)'
+        type: boolean
+        default: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/_checks.yml
+
+  verify-version:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify version consistency
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            TAG_VERSION="dry-run"
+          fi
+
+          PY_VERSION=$(python3 -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+          print(data['project']['version'])
+          ")
+
+          TS_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('ts/package.json','utf8')).version")
+
+          echo "Tag version:        ${TAG_VERSION}"
+          echo "pyproject.toml:     ${PY_VERSION}"
+          echo "ts/package.json:    ${TS_VERSION}"
+
+          if [ "${PY_VERSION}" != "${TS_VERSION}" ]; then
+            echo "ERROR: pyproject.toml (${PY_VERSION}) and ts/package.json (${TS_VERSION}) versions disagree"
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${TAG_VERSION}" != "${PY_VERSION}" ]; then
+            echo "ERROR: tag (${TAG_VERSION}) does not match manifest version (${PY_VERSION})"
+            exit 1
+          fi
+
+          echo "Version check passed: ${PY_VERSION}"
+
+  publish-npm:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm dlx publint
+      - name: Publish to npm
+        if: ${{ github.event_name == 'push' && !inputs.dry_run }}
+        run: pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+      - name: Dry run publish
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: pnpm publish --dry-run --no-git-checks
+
+  publish-pypi:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Publish to PyPI (OIDC trusted publishing)
+        if: ${{ github.event_name == 'push' && !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Dry run (skip upload)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: echo "Dry run — skipping PyPI upload; twine check passed above."
+
+  update-release-latest:
+    needs: [publish-npm, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward release-latest to this tag
+        if: ${{ github.event_name == 'push' }}
+        run: git push origin HEAD:refs/heads/release-latest

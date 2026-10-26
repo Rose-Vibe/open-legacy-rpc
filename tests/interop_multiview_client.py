@@ -3,10 +3,10 @@
 
 Server runs MultiViewExperiment (3 views: RDC/int, Unreliable/float, Unreliable/Vector3).
 """
+import logging
+import struct
 import sys
 import time
-import struct
-import logging
 
 sys.path.insert(0, '.')
 from protocol.unity_client import UnityClient

@@ -7,9 +7,8 @@ The server sends RPC_Int(42) on connect to verify the session works.
 Usage:
   sudo ip netns exec unitynet python3 tests/interop_password_server.py
 """
-import sys
-import time
 import logging
+import sys
 
 sys.path.insert(0, '.')
 from protocol.unity_server import UnityServer

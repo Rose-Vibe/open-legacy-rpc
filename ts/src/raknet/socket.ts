@@ -23,7 +23,7 @@ export class UdpSocket {
             if (this.errorHandler) {
               this.errorHandler(err instanceof Error ? err : new Error(String(err)));
             } else {
-              console.error('[UdpSocket] unhandled error in message handler:', err); // eslint-disable-line no-console
+              console.error('[UdpSocket] unhandled error in message handler:', err);
             }
           }
         }
@@ -35,7 +35,7 @@ export class UdpSocket {
           if (this.errorHandler) {
             this.errorHandler(err);
           } else {
-            console.error('[UdpSocket] socket error:', err); // eslint-disable-line no-console
+            console.error('[UdpSocket] socket error:', err);
           }
         });
         this.socket = sock;

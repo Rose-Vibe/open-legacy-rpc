@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { computeMethodId, computeMethodIndex, computeMethodTag, registerMethodNames } from '../src/unity/method-hash.js';
 import { encodeViewId16, decodeViewId16, encodeViewId, decodeViewIdBits } from '../src/unity/view-id.js';
 import { BitStream } from '../src/bitstream.js';
-import { decodeQueryReply, encodeQueryReply } from '../src/master/serialization.js';
+import { decodeQueryReply } from '../src/master/serialization.js';
 import {
   encodeRpcSubsequent,
   encodeRpcFirstUse,
@@ -39,14 +39,14 @@ function bytesToHex(bytes: Uint8Array): string {
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
 describe('Batch Index (0x07)', () => {
   it('encode/decode round-trips for RPC_Int', () => {
     const idx = 0x60;
-    const { data, bitLength } = encodeBatchIndex('RPC_Int', idx);
+    const { data } = encodeBatchIndex('RPC_Int', idx);
     expect(data[0]).toBe(MSG_ID_BATCH_INDEX);
     const decoded = decodeBatchIndex(data);
     expect(decoded).not.toBeNull();
@@ -850,7 +850,7 @@ describe('Delta State Sync', () => {
 
 describe('RPC u64 timestamp', () => {
   it('round-trips various timestamp values including > 65535', () => {
-    const encode = (ts: number) =>
+    const encode = (ts: number): ReturnType<typeof encodeRpcSubsequent> =>
       encodeRpcSubsequent({
         methodName: 'RPC_Int',
         params: [{ type: 'int', value: 1 }],
@@ -1267,7 +1267,6 @@ describe('bytes param size limit', () => {
     expect(() => decodeRpc(data, bitLength)).not.toThrow();
 
     // Manually construct a BitStream with a huge count in the params area
-    const bs = new BitStream(data, bitLength);
     // Navigate to where params start for a subsequent RPC_Bytes
     // Subsequent RPC format: 140 bits + params; params for bytes = u32(count) + data
     // The count is at bit offset 140

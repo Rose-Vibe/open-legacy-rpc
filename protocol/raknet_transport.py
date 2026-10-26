@@ -5,7 +5,6 @@ manage reliability, ACKs, and split packet reassembly.
 import logging
 import struct
 import time
-import socket
 from enum import IntEnum
 
 log = logging.getLogger(__name__)

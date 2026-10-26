@@ -1,12 +1,11 @@
 """
 Tests for ViewID allocation in UnityServer.
 """
-import time
 import threading
+import time
 
 from protocol.unity_client import UnityClient
 from protocol.unity_server import UnityServer
-from protocol.unity_protocol import RPCMode
 
 
 def _make_server_client(port, **kwargs):

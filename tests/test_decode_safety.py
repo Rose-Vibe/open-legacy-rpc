@@ -1,18 +1,25 @@
 """Tests for decode safety caps (fixes 1-8 + decodeBatchIndex)."""
 import logging
 import struct
+
 import pytest
 
 from protocol.bitstream import BitStream
 from protocol.master_serialization import (
-    decode_query_reply, ID_DATABASE_QUERY_REPLY,
+    ID_DATABASE_QUERY_REPLY,
+    decode_query_reply,
 )
 from protocol.raknet_transport import (
-    SplitPacketAssembler, EncapsulatedMessage, Reliability, RakNetPeer,
-    unpack_encapsulated, pack_datagram,
+    EncapsulatedMessage,
+    RakNetPeer,
+    Reliability,
+    SplitPacketAssembler,
+    unpack_encapsulated,
 )
 from protocol.unity_protocol import (
-    decode_rpc, decode_batch_index, MSG_ID_BATCH_INDEX,
+    MSG_ID_BATCH_INDEX,
+    decode_batch_index,
+    decode_rpc,
 )
 
 

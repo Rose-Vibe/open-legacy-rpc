@@ -4,18 +4,20 @@ ping/pong, disconnect. Manages state machine for a single connection.
 """
 import logging
 import os
+import select
 import socket
 import struct
 import time
-import select
-
-log = logging.getLogger(__name__)
 
 from .raknet_transport import (
-    OFFLINE_MAGIC, MTU_SIZE, Reliability, EncapsulatedMessage,
-    RakNetPeer, encode_address, decode_address, unpack_datagram,
-    pack_datagram, pack_ack, pack_encapsulated,
+    MTU_SIZE,
+    OFFLINE_MAGIC,
+    RakNetPeer,
+    Reliability,
+    encode_address,
 )
+
+log = logging.getLogger(__name__)
 
 RAKNET_PROTOCOL_VERSION = 0x0b
 

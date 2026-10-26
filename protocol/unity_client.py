@@ -5,19 +5,25 @@ Connects to a Unity server, sends/receives RPCs and state sync.
 import logging
 import time
 
-log = logging.getLogger(__name__)
-
 from .raknet_connection import (
-    RakNetClient, ConnectionState,
     ID_UNITY_RPC_OR_SYNC,
+    ConnectionState,
+    RakNetClient,
 )
 from .raknet_transport import Reliability
 from .unity_protocol import (
-    RPCMode, encode_rpc_first_use, encode_rpc_subsequent,
-    decode_rpc, decode_state_sync, METHOD_SIGNATURES, is_rpc,
-    MSG_ID_BATCH_INDEX, encode_batch_index, decode_batch_index,
+    MSG_ID_BATCH_INDEX,
+    RPCMode,
+    decode_batch_index,
+    decode_rpc,
+    decode_state_sync,
+    encode_batch_index,
+    encode_rpc_first_use,
+    encode_rpc_subsequent,
+    is_rpc,
 )
-from .bitstream import BitStream
+
+log = logging.getLogger(__name__)
 
 
 class UnityClient:

@@ -2,13 +2,14 @@
 Integration test: Python client <-> Python server.
 Validates the full protocol stack (RakNet + Unity layer) without Unity.
 """
-import time
+import sys
 import threading
+import time
 
-from protocol.unity_client import UnityClient
-from protocol.unity_server import UnityServer
-from protocol.unity_protocol import RPCMode
 from protocol.bitstream import BitStream
+from protocol.unity_client import UnityClient
+from protocol.unity_protocol import RPCMode
+from protocol.unity_server import UnityServer
 
 
 def test_connect_disconnect():
@@ -219,8 +220,8 @@ def test_disconnect_cleanup():
         c1.connect('127.0.0.1', 17779, timeout=2.0)
         assert c1.connected
         addr1 = connected[0][0]
-        v1 = server.allocate_view_id(addr1)
-        v2 = server.allocate_view_id(addr1)
+        server.allocate_view_id(addr1)
+        server.allocate_view_id(addr1)
         assert len(server.get_allocated_views(addr1)) == 2
         c1.disconnect()
         time.sleep(0.3)
@@ -371,7 +372,9 @@ def test_peer_launch_id():
 def test_decode_rpc_target_view():
     """decode_rpc() extracts target_view from both subsequent-use and first-use RPCs."""
     from protocol.unity_protocol import (
-        encode_rpc_subsequent, encode_rpc_first_use, decode_rpc, RPCMode,
+        decode_rpc,
+        encode_rpc_first_use,
+        encode_rpc_subsequent,
     )
 
     # Subsequent-use

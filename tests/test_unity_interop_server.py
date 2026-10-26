@@ -12,9 +12,9 @@ Launch Unity client with:
 import sys
 import time
 
-from protocol.unity_server import UnityServer
-from protocol.unity_protocol import RPCMode
 from protocol.bitstream import BitStream
+from protocol.unity_protocol import RPCMode
+from protocol.unity_server import UnityServer
 
 
 def main():

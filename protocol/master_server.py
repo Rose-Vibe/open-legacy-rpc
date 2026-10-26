@@ -10,20 +10,30 @@ import logging
 import socket
 import time
 
-from .raknet_connection import RakNetServer
-from .raknet_transport import Reliability
+from .bitstream import BitStream
 from .master_serialization import (
-    ID_DATABASE_QUERY_REQUEST, ID_DATABASE_UPDATE_ROW, ID_DATABASE_REMOVE_ROW,
-    ID_DATABASE_QUERY_REPLY, ID_DATABASE_ROWID, ID_MASTERSERVER_MSG,
-    NUMERIC, STRING, BINARY,
-    RUM_UPDATE_EXISTING_ROW, RUM_UPDATE_OR_ADD_ROW, RUM_ADD_NEW_ROW,
+    BINARY,
+    ID_DATABASE_QUERY_REPLY,
+    ID_DATABASE_QUERY_REQUEST,
+    ID_DATABASE_REMOVE_ROW,
+    ID_DATABASE_UPDATE_ROW,
+    ID_MASTERSERVER_MSG,
+    NUMERIC,
+    RUM_ADD_NEW_ROW,
+    RUM_UPDATE_EXISTING_ROW,
+    RUM_UPDATE_OR_ADD_ROW,
     VERSION,
-    decode_update_row, decode_query_request, decode_remove_row,
-    encode_query_reply, encode_rowid, encode_unknown_table,
+    decode_query_request,
+    decode_remove_row,
+    decode_update_row,
     encode_incorrect_password,
+    encode_query_reply,
+    encode_rowid,
+    encode_unknown_table,
     write_huffman_string,
 )
-from .bitstream import BitStream
+from .raknet_connection import RakNetServer
+from .raknet_transport import Reliability
 
 log = logging.getLogger(__name__)
 

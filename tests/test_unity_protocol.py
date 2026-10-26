@@ -3,23 +3,42 @@ import struct
 import sys
 from pathlib import Path
 
-from protocol.unity_protocol import (
-    RPCMode, encode_rpc_subsequent, encode_rpc_first_use, decode_rpc,
-    encode_state_sync, decode_state_sync, encode_view_id, METHOD_SIGNATURES,
-    compute_method_id, method_hash_hex, class_guid_hex,
-    compute_method_index, METHOD_INDEX_MAP, INDEX_TO_METHOD,
-    INTERNAL_RPCS, INTERNAL_RPC_CONSTANT,
-    lookup_method_by_hash, lookup_method_by_identifier,
-    register_method_names,
-    encode_view_id_16, decode_view_id_16,
-    encode_instantiate_group_flags, decode_instantiate_group_flags,
-    encode_instantiate_params, decode_instantiate_params,
-    METHOD_TAG_MAP, register_method_indices,
-    register_method_tag, register_method_tags,
-    compute_method_tag, _reset_tag_mismatch_warnings,
-    encode_batch_index, decode_batch_index, MSG_ID_BATCH_INDEX,
-)
 from protocol.bitstream import BitStream
+from protocol.unity_protocol import (
+    INDEX_TO_METHOD,
+    INTERNAL_RPC_CONSTANT,
+    METHOD_INDEX_MAP,
+    METHOD_SIGNATURES,
+    METHOD_TAG_MAP,
+    MSG_ID_BATCH_INDEX,
+    RPCMode,
+    _reset_tag_mismatch_warnings,
+    class_guid_hex,
+    compute_method_id,
+    compute_method_index,
+    compute_method_tag,
+    decode_batch_index,
+    decode_instantiate_group_flags,
+    decode_instantiate_params,
+    decode_rpc,
+    decode_state_sync,
+    decode_view_id_16,
+    encode_batch_index,
+    encode_instantiate_group_flags,
+    encode_instantiate_params,
+    encode_rpc_first_use,
+    encode_rpc_subsequent,
+    encode_state_sync,
+    encode_view_id,
+    encode_view_id_16,
+    lookup_method_by_hash,
+    lookup_method_by_identifier,
+    method_hash_hex,
+    register_method_indices,
+    register_method_names,
+    register_method_tag,
+    register_method_tags,
+)
 
 
 def test_view_id_encoding():
@@ -635,19 +654,19 @@ def test_bytes_param_size_limit():
     assert result['params'][0] == b'\x00'
 
     # Now build a payload with an absurd count
-    bs = BitStream(payload, bits)
+    BitStream(payload, bits)
     # Find where the bytes count is and replace it with a huge value
     # Easier: construct a minimal bitstream manually
     payload2, bits2 = encode_rpc_subsequent('RPC_Bytes', [b''], 1, 0, RPCMode.Server, target_view=0x2000)
     # Replace the 4-byte count (value 0) with MAX_BYTES_PARAM_SIZE + 1
     import pytest
-    bs2 = BitStream(payload2, bits2)
+    BitStream(payload2, bits2)
     # Navigate to the param area: for subsequent RPC_Bytes, params start after mode bits
     # The count is at a specific bit offset - just test by encoding a huge payload
     # Instead, test through decode_rpc by crafting raw bytes
     big_count = MAX_BYTES_PARAM_SIZE + 1
     # Encode an RPC with 0-length bytes, then find and replace the count
-    data = bytearray(payload2)
+    bytearray(payload2)
     # The count is the last 4 bytes of meaningful data before end (big-endian u32)
     # For an empty bytes param, the count=0 is encoded as 4 zero bytes right before the end
     # Easier approach: just use _decode_params directly

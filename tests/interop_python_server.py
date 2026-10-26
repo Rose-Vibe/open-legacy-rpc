@@ -8,9 +8,9 @@ Expected behavior:
 Usage: Run this script first, then start Unity client with ClientInteropExperiment.
   sudo ip netns exec unitynet python3 tests/interop_python_server.py
 """
+import logging
 import sys
 import time
-import logging
 
 sys.path.insert(0, '.')
 from protocol.unity_server import UnityServer

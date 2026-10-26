@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RakNetServer, RakNetClient, ConnectionState } from '../src/raknet/connection.js';
 import { UdpSocket } from '../src/raknet/socket.js';
-import { Reliability } from '../src/raknet/types.js';
 import { MasterClient } from '../src/master/client.js';
 
 describe('exception safety', () => {
@@ -141,7 +140,7 @@ describe('exception safety', () => {
   });
 
   describe('Fix 8: UnityClient RPC handler catch', () => {
-    it('does not crash when RPC handler throws', async () => {
+    it('does not crash when RPC handler throws', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       // This is tested via the full connection flow in other tests;
       // here we verify the pattern exists by checking the error spy

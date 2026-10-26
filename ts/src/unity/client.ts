@@ -7,7 +7,6 @@ import {
   encodeRpcFirstUse,
   decodeRpc,
   isRpc,
-  getBuiltinMethodNames,
   hasMethodIndex,
   learnMethodIndex,
   encodeBatchIndex,
@@ -216,7 +215,7 @@ export class UnityClient {
         this.ourIndices.set(decoded.methodName, idx);
         this.ourIndexReverse.set(idx, decoded.methodName);
       }
-      const ourIdx = this.ourIndices.get(decoded.methodName)!;
+      const ourIdx = this.ourIndices.get(decoded.methodName) as number;
       const batch = encodeBatchIndex(decoded.methodName, ourIdx);
       this.raknet.send(batch.data, Reliability.UNRELIABLE, batch.bitLength);
     } else if (!decoded.firstUse && decoded.methodIndex !== undefined) {
@@ -225,7 +224,7 @@ export class UnityClient {
         decoded.methodName = resolved;
       } else if (decoded.methodName.startsWith('unknown_0x') &&
                  this.rpcReceivedFirstUse.length > 0) {
-        const pending = this.rpcReceivedFirstUse.shift()!;
+        const pending = this.rpcReceivedFirstUse.shift() as string;
         learnMethodIndex(pending, decoded.methodIndex);
         decoded.methodName = pending;
       }

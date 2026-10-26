@@ -1,10 +1,11 @@
 """Tests for exception safety fixes (Python side)."""
 import logging
 import time
-import pytest
 
 from protocol.raknet_transport import (
-    SplitPacketAssembler, EncapsulatedMessage, Reliability,
+    EncapsulatedMessage,
+    Reliability,
+    SplitPacketAssembler,
 )
 
 

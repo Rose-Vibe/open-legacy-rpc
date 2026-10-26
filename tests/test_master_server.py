@@ -2,25 +2,32 @@
 Tests for the master server protocol — serialization, server, and client.
 """
 
-import time
 import threading
+import time
 import unittest
 
-from protocol.master_serialization import (
-    NUMERIC, STRING, BINARY,
-    ID_DATABASE_QUERY_REPLY, ID_DATABASE_UPDATE_ROW, ID_DATABASE_QUERY_REQUEST,
-    ID_DATABASE_REMOVE_ROW, ID_DATABASE_ROWID,
-    RUM_UPDATE_OR_ADD_ROW, RUM_UPDATE_EXISTING_ROW, RUM_ADD_NEW_ROW,
-    decode_update_row, encode_update_row,
-    decode_query_request, encode_query_request,
-    decode_query_reply, encode_query_reply,
-    decode_remove_row, encode_remove_row,
-    encode_rowid, read_huffman_string, write_huffman_string,
-    read_cell, write_cell,
-)
 from protocol.bitstream import BitStream
-from protocol.master_server import MasterServer
 from protocol.master_client import MasterClient
+from protocol.master_serialization import (
+    BINARY,
+    NUMERIC,
+    RUM_UPDATE_EXISTING_ROW,
+    RUM_UPDATE_OR_ADD_ROW,
+    STRING,
+    decode_query_reply,
+    decode_query_request,
+    decode_remove_row,
+    decode_update_row,
+    encode_query_reply,
+    encode_query_request,
+    encode_remove_row,
+    encode_update_row,
+    read_cell,
+    read_huffman_string,
+    write_cell,
+    write_huffman_string,
+)
+from protocol.master_server import MasterServer
 
 
 class TestHuffmanStringSerialization(unittest.TestCase):
@@ -349,7 +356,7 @@ class TestMasterServerPingTimeout(unittest.TestCase):
     """Test that stale entries are removed after ping timeout."""
 
     def test_stale_entry_removed(self):
-        from protocol.master_server import Table, PING_TIMEOUT
+        from protocol.master_server import PING_TIMEOUT, Table
         table = Table('test')
         table.add_column('Game name', STRING)
 
@@ -427,7 +434,6 @@ class TestMasterServerVersionMismatch(unittest.TestCase):
             client = RakNetClient(unity_protocol=False)
             client.connect('127.0.0.1', port, timeout=2.0)
 
-            from protocol.master_serialization import encode_query_request
             from protocol.bitstream import BitStream as BS
 
             bs = BS()
@@ -567,7 +573,7 @@ class TestSocketFeatures(unittest.TestCase):
 
     def test_client_local_address_binds_correctly(self):
         """RakNetClient.connect() with local_address binds to that IP."""
-        from protocol.raknet_connection import RakNetClient, RakNetServer, ConnectionState
+        from protocol.raknet_connection import ConnectionState, RakNetClient, RakNetServer
 
         server = RakNetServer(port=0, unity_protocol=False)
         server.start()

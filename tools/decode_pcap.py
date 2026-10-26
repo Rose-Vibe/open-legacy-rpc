@@ -8,24 +8,39 @@ Usage:
 import argparse
 import json
 import math
+import os
 import struct
 import sys
-import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from protocol.pcap_reader import read_pcap
-from protocol.raknet import parse_datagram, Reliability, is_offline_message
-from protocol.unity_protocol import (
-    decode_rpc, decode_batch_index, decode_state_sync, is_rpc,
-    MSG_ID_RPC, MSG_ID_BATCH_INDEX, METHOD_SIGNATURES, RPCMode,
-    compute_method_tag,
-)
 from protocol.master_serialization import (
-    ID_DATABASE_QUERY_REQUEST, ID_DATABASE_UPDATE_ROW, ID_DATABASE_REMOVE_ROW,
-    ID_DATABASE_QUERY_REPLY, ID_DATABASE_UNKNOWN_TABLE, ID_DATABASE_INCORRECT_PASSWORD,
-    ID_DATABASE_ROWID, ID_MASTERSERVER_REDIRECT, ID_MASTERSERVER_MSG,
-    decode_query_request, decode_update_row, decode_remove_row, decode_query_reply,
+    ID_DATABASE_INCORRECT_PASSWORD,
+    ID_DATABASE_QUERY_REPLY,
+    ID_DATABASE_QUERY_REQUEST,
+    ID_DATABASE_REMOVE_ROW,
+    ID_DATABASE_ROWID,
+    ID_DATABASE_UNKNOWN_TABLE,
+    ID_DATABASE_UPDATE_ROW,
+    ID_MASTERSERVER_MSG,
+    ID_MASTERSERVER_REDIRECT,
+    decode_query_reply,
+    decode_query_request,
+    decode_remove_row,
+    decode_update_row,
+)
+from protocol.pcap_reader import read_pcap
+from protocol.raknet import Reliability, parse_datagram
+from protocol.unity_protocol import (
+    METHOD_SIGNATURES,
+    MSG_ID_BATCH_INDEX,
+    MSG_ID_RPC,
+    RPCMode,
+    compute_method_tag,
+    decode_batch_index,
+    decode_rpc,
+    decode_state_sync,
+    is_rpc,
 )
 
 CONNECTION_MSG_NAMES = {

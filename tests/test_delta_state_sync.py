@@ -2,16 +2,15 @@
 Tests for ReliableDeltaCompressed state sync encoding/decoding and server integration.
 """
 import struct
-import time
 import threading
+import time
 
+from protocol.unity_client import UnityClient
 from protocol.unity_protocol import (
-    encode_delta_state_sync, decode_delta_state_sync,
+    decode_delta_state_sync,
+    encode_delta_state_sync,
 )
 from protocol.unity_server import UnityServer
-from protocol.unity_client import UnityClient
-from protocol.raknet_transport import Reliability
-
 
 # ── Unit tests: encode / decode round-trip ──
 

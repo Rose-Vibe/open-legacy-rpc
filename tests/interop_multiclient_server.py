@@ -10,9 +10,9 @@ Expected behavior:
 
 Usage: Run this script first, then start 3 Unity clients.
 """
+import logging
 import sys
 import time
-import logging
 
 sys.path.insert(0, '.')
 from protocol.unity_server import UnityServer

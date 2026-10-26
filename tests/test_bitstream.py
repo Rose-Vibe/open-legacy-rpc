@@ -1,4 +1,5 @@
 import struct
+import sys
 
 from protocol.bitstream import BitStream
 

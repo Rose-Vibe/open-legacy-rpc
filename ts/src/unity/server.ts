@@ -9,7 +9,6 @@ import {
   encodeRpcFirstUse,
   decodeRpc,
   isRpc,
-  getBuiltinMethodNames,
   hasMethodIndex,
   learnMethodIndex,
   encodeBatchIndex,
@@ -302,7 +301,7 @@ export class UnityServer {
         result = encodeRpcFirstUse(opts);
       }
     } catch (err) {
-      console.error(`[UnityServer] RPC encode error for ${methodName}:`, err); // eslint-disable-line no-console
+      console.error(`[UnityServer] RPC encode error for ${methodName}:`, err);
       return;
     }
 
@@ -346,7 +345,7 @@ export class UnityServer {
         this.ourIndexReverse.set(idx, decoded.methodName);
       }
       if (this.sendBatchIndices) {
-        const ourIdx = this.ourIndices.get(decoded.methodName)!;
+        const ourIdx = this.ourIndices.get(decoded.methodName) as number;
         const batch = encodeBatchIndex(decoded.methodName, ourIdx);
         this.raknet.sendTo(session, batch.data, Reliability.UNRELIABLE, batch.bitLength);
       }
@@ -357,7 +356,7 @@ export class UnityServer {
       } else if (decoded.methodName.startsWith('unknown_0x')) {
         const queue = this.rpcReceivedFirstUse.get(session.id);
         if (queue && queue.length > 0) {
-          const pending = queue.shift()!;
+          const pending = queue.shift() as string;
           learnMethodIndex(pending, decoded.methodIndex);
           decoded.methodName = pending;
         }
@@ -381,7 +380,7 @@ export class UnityServer {
       try {
         handler(session, ...decoded.params, decoded.targetView);
       } catch (err) {
-        console.error(`[UnityServer] RPC handler error for ${decoded.methodName}:`, err); // eslint-disable-line no-console
+        console.error(`[UnityServer] RPC handler error for ${decoded.methodName}:`, err);
       }
     }
   }
@@ -414,7 +413,7 @@ export class UnityServer {
       try {
         h(session, syncMsg);
       } catch (err) {
-        console.error('[UnityServer] StateSync handler error:', err); // eslint-disable-line no-console
+        console.error('[UnityServer] StateSync handler error:', err);
       }
     }
   }

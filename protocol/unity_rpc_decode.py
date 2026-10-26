@@ -36,10 +36,9 @@ Parameter encoding by type:
 import os
 import struct
 
-from .raknet import parse_datagram
+from .huffman import decode_string, get_tree
 from .pcap_reader import read_pcap
-from .huffman import get_tree, decode_string, encode_string_for_wire
-
+from .raknet import parse_datagram
 
 RPCMODE_NAMES = {0: 'Server', 1: 'Others', 2: 'All', 5: 'OthersBuffered', 6: 'AllBuffered'}
 
@@ -221,7 +220,7 @@ def _decode_subsequent(br, result, bit_length):
     br.pos = 80
     method_index_byte = br.read_bits(8) & 0xFE
     result['method_index_byte'] = hex(method_index_byte)
-    result['method_name'] = METHOD_INDEX_MAP.get(method_index_byte, 'unknown_0x%02x' % method_index_byte)
+    result['method_name'] = METHOD_INDEX_MAP.get(method_index_byte, f'unknown_0x{method_index_byte:02x}')
 
     br.pos = 136
     result['rpc_mode'] = br.read_bits(4)
@@ -366,54 +365,54 @@ def main():
         if not rpcs:
             continue
 
-        print('=== %s ===' % exp_name)
+        print(f'=== {exp_name} ===')
         for i, r in enumerate(rpcs):
-            parts = ['  RPC %d: %s %dbits' % (i + 1, r['direction'], r['bit_length'])]
-            parts.append('ts=%d' % r.get('timestamp_ms', -1))
+            parts = [f"  RPC {i + 1}: {r['direction']} {r['bit_length']}bits"]
+            parts.append(f"ts={r.get('timestamp_ms', -1)}")
 
             if r.get('first_use'):
                 parts.append('FIRST_USE')
                 if 'class_guid_matches' in r:
-                    parts.append('guid=%s' % ('OK' if r['class_guid_matches'] else r.get('class_guid')))
+                    parts.append('guid={}'.format('OK' if r['class_guid_matches'] else r.get('class_guid')))
                 if 'method_hash' in r:
-                    parts.append('method_hash=%s' % r['method_hash'])
+                    parts.append('method_hash={}'.format(r['method_hash']))
             else:
-                parts.append('method=%s' % r.get('method_name', '?'))
+                parts.append('method={}'.format(r.get('method_name', '?')))
 
             if 'rpc_mode_name' in r:
-                parts.append('mode=%s' % r['rpc_mode_name'])
+                parts.append('mode={}'.format(r['rpc_mode_name']))
 
             if 'params' in r:
                 for ptype, pval in r['params']:
                     if ptype == 'int':
-                        parts.append('int=%d' % pval)
+                        parts.append(f'int={pval}')
                     elif ptype == 'float':
-                        parts.append('float=%.6f' % pval)
+                        parts.append(f'float={pval:.6f}')
                     elif ptype == 'string':
-                        parts.append('string=%r' % pval)
+                        parts.append(f'string={pval!r}')
                     elif ptype == 'Vector3':
-                        parts.append('vec3=(%.3f, %.3f, %.3f)' % pval)
+                        parts.append('vec3=({:.3f}, {:.3f}, {:.3f})'.format(*pval))
                     elif ptype == 'Quaternion':
-                        parts.append('quat=(%.3f, %.3f, %.3f, %.3f)' % pval)
+                        parts.append('quat=({:.3f}, {:.3f}, {:.3f}, {:.3f})'.format(*pval))
                     elif ptype == 'bytes':
-                        parts.append('bytes=%s' % pval)
+                        parts.append(f'bytes={pval}')
             elif 'param_string' in r:
-                parts.append('string=%r' % r['param_string'])
+                parts.append('string={!r}'.format(r['param_string']))
             elif 'param_i32' in r:
                 val = r['param_i32']
                 fval = r['param_float']
                 if abs(fval) > 1e-10 and abs(fval) < 1e10:
-                    parts.append('param_i32=%d / float=%.6f' % (val, fval))
+                    parts.append(f'param_i32={val} / float={fval:.6f}')
                 else:
-                    parts.append('param_i32=%d' % val)
+                    parts.append(f'param_i32={val}')
             elif 'param_vector3' in r:
-                parts.append('vec3=(%.3f, %.3f, %.3f)' % r['param_vector3'])
+                parts.append('vec3=({:.3f}, {:.3f}, {:.3f})'.format(*r['param_vector3']))
             elif 'param_quaternion' in r:
-                parts.append('quat=(%.3f, %.3f, %.3f, %.3f)' % r['param_quaternion'])
+                parts.append('quat=({:.3f}, {:.3f}, {:.3f}, {:.3f})'.format(*r['param_quaternion']))
             elif 'param_bytes' in r:
-                parts.append('bytes[%d]=%s' % (r['param_byte_count'], r['param_bytes']))
+                parts.append(f"bytes[{r['param_byte_count']}]={r['param_bytes']}")
             elif 'param_raw' in r:
-                parts.append('param_raw=%s (%d bits)' % (r['param_raw'], r.get('param_bits', 0)))
+                parts.append(f"param_raw={r['param_raw']} ({r.get('param_bits', 0)} bits)")
 
             print(' '.join(parts))
         print()

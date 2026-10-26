@@ -81,7 +81,7 @@ describe('decode safety caps', () => {
       const rl = new ReliabilityLayer({ host: '127.0.0.1', port: 7777 });
 
       const frame = {
-        reliability: Reliability.RELIABLE as number,
+        reliability: Reliability.RELIABLE,
         bitLength: 8,
         reliableMsgNumber: 0,
         orderingIndex: null,
@@ -104,7 +104,7 @@ describe('decode safety caps', () => {
       const rl = new ReliabilityLayer({ host: '127.0.0.1', port: 7777 });
 
       const frame = {
-        reliability: Reliability.RELIABLE as number,
+        reliability: Reliability.RELIABLE,
         bitLength: 8,
         reliableMsgNumber: 0,
         orderingIndex: null,

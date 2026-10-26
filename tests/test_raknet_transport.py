@@ -1,10 +1,21 @@
 import socket as _sock_mod
+import sys
 
 from protocol.raknet_transport import (
-    EncapsulatedMessage, Reliability, pack_encapsulated, unpack_encapsulated,
-    pack_datagram, pack_ack, unpack_datagram, encode_address, decode_address,
-    SplitPacketAssembler, encode_u24_le, decode_u24_le, RakNetPeer,
     MAX_FRAGMENT_PAYLOAD,
+    EncapsulatedMessage,
+    RakNetPeer,
+    Reliability,
+    SplitPacketAssembler,
+    decode_address,
+    decode_u24_le,
+    encode_address,
+    encode_u24_le,
+    pack_ack,
+    pack_datagram,
+    pack_encapsulated,
+    unpack_datagram,
+    unpack_encapsulated,
 )
 
 
@@ -180,6 +191,7 @@ def test_split_assembler_limits_pending():
 def test_sequence_number_wrapping():
     """RakNetPeer wraps _send_seq at 24 bits."""
     import socket as sock_mod
+
     from protocol.raknet_transport import RakNetPeer
     s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_DGRAM)
     s.setblocking(False)

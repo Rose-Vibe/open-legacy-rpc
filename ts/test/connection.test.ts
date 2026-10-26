@@ -533,7 +533,7 @@ describe('RakNetClient', () => {
     // Attach rejection handler immediately so it's not "unhandled"
     const connectPromise = client
       .connect('127.0.0.1', 7777, { timeout: 200 })
-      .catch((e: Error) => e);
+      .catch((e: unknown) => e as Error);
 
     await vi.advanceTimersByTimeAsync(300);
     const result = await connectPromise;
@@ -556,7 +556,6 @@ describe('RakNetServer multi-port', () => {
 
   it('accepts connections on multiple ports', async () => {
     const sock1 = createMockSocket(7777);
-    const sock2 = createMockSocket(7778);
     const server = new RakNetServer(sock1, { port: 7777 });
     await server.start();
 
