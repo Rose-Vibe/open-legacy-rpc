@@ -7,7 +7,7 @@ How to drive the Unity editor non-interactively to build a player. Assumes the e
 ```bash
 xvfb-run -a ~/unity-2018.1.6f1/Editor/Unity \
   -batchmode -nographics \
-  -projectPath /home/server-mint/unity-legacy-networking-reversed/UnityProject \
+  -projectPath /path/to/UnityProject \
   -executeMethod BuildScript.BuildLinuxPlayer \
   -accept-apiupdate \
   -quit \

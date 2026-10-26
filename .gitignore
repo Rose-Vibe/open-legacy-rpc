@@ -6,3 +6,4 @@ node_modules/
 UnityProject/Library/
 UnityProject/Builds/
 experiments/*.dll
+captures/
