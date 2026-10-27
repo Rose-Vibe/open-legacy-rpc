@@ -43,21 +43,35 @@ jobs:
 
           TS_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('ts/package.json','utf8')).version")
 
+          # Normalize PEP 440 pre-release to semver for cross-ecosystem comparison:
+          # 1.0.0rc1 -> 1.0.0-rc.1, 1.0.0a1 -> 1.0.0-alpha.1, 1.0.0b1 -> 1.0.0-beta.1
+          PY_NORMALIZED=$(python3 -c "
+          import re, sys
+          v = sys.argv[1]
+          m = re.match(r'^(\d+\.\d+\.\d+)(rc|a|b)(\d+)$', v)
+          if m:
+              base, pre, num = m.groups()
+              label = {'rc': 'rc', 'a': 'alpha', 'b': 'beta'}[pre]
+              print(f'{base}-{label}.{num}')
+          else:
+              print(v)
+          " "$PY_VERSION")
+
           echo "Tag version:        ${TAG_VERSION}"
-          echo "pyproject.toml:     ${PY_VERSION}"
+          echo "pyproject.toml:     ${PY_VERSION} (normalized: ${PY_NORMALIZED})"
           echo "ts/package.json:    ${TS_VERSION}"
 
-          if [ "${PY_VERSION}" != "${TS_VERSION}" ]; then
-            echo "ERROR: pyproject.toml (${PY_VERSION}) and ts/package.json (${TS_VERSION}) versions disagree"
+          if [ "${PY_NORMALIZED}" != "${TS_VERSION}" ]; then
+            echo "ERROR: pyproject.toml (${PY_VERSION} → ${PY_NORMALIZED}) and ts/package.json (${TS_VERSION}) versions disagree"
             exit 1
           fi
 
-          if [ "${{ github.event_name }}" = "push" ] && [ "${TAG_VERSION}" != "${PY_VERSION}" ]; then
-            echo "ERROR: tag (${TAG_VERSION}) does not match manifest version (${PY_VERSION})"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${TAG_VERSION}" != "${TS_VERSION}" ]; then
+            echo "ERROR: tag (${TAG_VERSION}) does not match manifest version (${TS_VERSION})"
             exit 1
           fi
 
-          echo "Version check passed: ${PY_VERSION}"
+          echo "Version check passed: ${TS_VERSION}"
 
   publish-npm:
     needs: verify-version
@@ -84,7 +98,13 @@ jobs:
       - run: pnpm dlx publint
       - name: Publish to npm
         if: ${{ github.event_name == 'push' && !inputs.dry_run }}
-        run: pnpm publish --no-git-checks --provenance
+        run: |
+          # Pre-release versions (containing a hyphen) publish to "next", not "latest"
+          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
+            pnpm publish --no-git-checks --provenance --tag next
+          else
+            pnpm publish --no-git-checks --provenance
+          fi
       - name: Dry run publish
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: pnpm publish --dry-run --no-git-checks
