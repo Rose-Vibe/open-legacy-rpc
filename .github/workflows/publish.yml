@@ -87,21 +87,24 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: ts/package.json
-      - uses: actions/setup-node@v4
+      # Node 24 bundles npm 11; trusted publishing (OIDC) needs npm >= 11.5.1.
+      # No dependency cache in the release job, per npm's trusted-publishing guidance.
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: https://registry.npmjs.org
-          cache: pnpm
-          cache-dependency-path: ts/pnpm-lock.yaml
+          package-manager-cache: false
+      - name: Require npm >= 11.5.1 for trusted publishing
+        run: |
+          v=$(npm -v)
+          echo "npm $v"
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); if (a<11 || (a===11 && (b<5 || (b===5 && c<1)))) { console.error("npm "+process.argv[1]+" is too old for trusted publishing (need >= 11.5.1)"); process.exit(1) }' "$v"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm dlx publint
       - name: Publish to npm
         if: ${{ github.event_name == 'push' && !inputs.dry_run }}
         run: |
-          # setup-node injects NODE_AUTH_TOKEN (GitHub token) into .npmrc, which
-          # prevents npm's OIDC trusted publishing exchange. Remove it first.
-          npm config delete //registry.npmjs.org/:_authToken
           # Pre-release versions (containing a hyphen) publish to "next", not "latest".
           if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
             npm publish --provenance --tag next
@@ -110,7 +113,7 @@ jobs:
           fi
       - name: Dry run publish
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-        run: pnpm publish --dry-run --no-git-checks
+        run: npm publish --dry-run
 
   publish-pypi:
     needs: verify-version
