@@ -23,7 +23,9 @@ docs/plans/     Sprint plans (active and archived)
 
 ## Prerequisites
 
-- **Python**: 3.10+
+- **Python**: 3.11+. It may also run on older versions back to 3.8 (the
+  package allows installing on them), but they are not supported or
+  tested in CI.
 - **Node.js**: 22+ (TypeScript implementation). It may also run on older
   versions such as 18 or 20, but they are not supported or tested in CI.
 
