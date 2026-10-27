@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-legacy-rpc"
-version = "1.0.0rc1"
+version = "1.0.0"
 description = "Reverse-engineered wire format and implementation of Unity's legacy RPC networking (NetworkView / [RPC] / OnSerializeNetworkView)"
 readme = "README.md"
 requires-python = ">=3.8"
