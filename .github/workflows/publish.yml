@@ -5,14 +5,14 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-
-permissions:
-  contents: read
     inputs:
       dry_run:
         description: 'Dry run (skip actual publish to registries)'
         type: boolean
         default: true
+
+permissions:
+  contents: read
 
 jobs:
   checks:
@@ -84,10 +84,7 @@ jobs:
       - run: pnpm dlx publint
       - name: Publish to npm
         if: ${{ github.event_name == 'push' && !inputs.dry_run }}
-        run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
+        run: pnpm publish --no-git-checks --provenance
       - name: Dry run publish
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: pnpm publish --dry-run --no-git-checks
