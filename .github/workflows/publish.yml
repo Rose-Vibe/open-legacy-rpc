@@ -99,7 +99,9 @@ jobs:
       - name: Publish to npm
         if: ${{ github.event_name == 'push' && !inputs.dry_run }}
         run: |
-          # Use npm (not pnpm) so OIDC trusted publishing works natively.
+          # setup-node injects NODE_AUTH_TOKEN (GitHub token) into .npmrc, which
+          # prevents npm's OIDC trusted publishing exchange. Remove it first.
+          npm config delete //registry.npmjs.org/:_authToken
           # Pre-release versions (containing a hyphen) publish to "next", not "latest".
           if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
             npm publish --provenance --tag next
