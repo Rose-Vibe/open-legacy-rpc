@@ -84,7 +84,7 @@ jobs:
         working-directory: ts
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: ts/package.json
       # Node 24 bundles npm 11; trusted publishing (OIDC) needs npm >= 11.5.1.
